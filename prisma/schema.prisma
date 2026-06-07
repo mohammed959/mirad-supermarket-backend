@@ -1,0 +1,715 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────
+
+enum Role {
+  CUSTOMER
+  SUPER_ADMIN
+  PICKER
+  DRIVER
+}
+
+enum OrderStatus {
+  NEW
+  PAYMENT_VERIFIED
+  ASSIGNED_TO_PICKER
+  PICKING_IN_PROGRESS
+  READY_FOR_DELIVERY
+  READY_FOR_PICKUP
+  ASSIGNED_TO_DRIVER
+  OUT_FOR_DELIVERY
+  DELIVERED
+  PICKED_UP_BY_CUSTOMER
+  COMPLETED
+  CONFIRMED
+  CANCELLED
+  REJECTED
+}
+
+enum FulfillmentType {
+  DELIVERY
+  PICKUP
+}
+
+enum PickupType {
+  ASAP
+  SCHEDULED
+}
+
+enum PaymentMethod {
+  CASH_ON_DELIVERY
+  BANK_TRANSFER
+  PAY_AT_BRANCH
+}
+
+enum PaymentStatus {
+  PENDING
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+}
+
+enum VariantType {
+  PIECE
+  CARTON
+  DOZEN
+  BUNDLE
+}
+
+enum PromotionType {
+  BUY_X_GET_Y
+  VARIANT_DISCOUNT
+  PRODUCT_DISCOUNT
+  CATEGORY_DISCOUNT
+  FREE_DELIVERY_THRESHOLD
+  SUBSCRIPTION_BASED_DISCOUNT
+}
+
+enum TargetScope {
+  ALL
+  PRODUCT
+  VARIANT
+  CATEGORY
+  SUBCATEGORY
+}
+
+enum SubscriptionBenefitType {
+  FREE_DELIVERY
+  DISCOUNTED_DELIVERY
+  CAPPED_DELIVERY
+}
+
+enum SubscriptionStatus {
+  PENDING_PAYMENT
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+enum NotificationType {
+  ORDER_STATUS_CHANGED
+  ORDER_ASSIGNED
+  SUBSCRIPTION_ACTIVATED
+  SUBSCRIPTION_EXPIRING
+  PROMOTION_ACTIVATED
+}
+
+enum OrderItemStatus {
+  PENDING
+  PICKED
+  UNAVAILABLE
+  REPLACED
+  REMOVED
+}
+
+// ─── Users & Auth ─────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  mobile       String?  @unique
+  email        String?  @unique
+  username     String?  @unique
+  passwordHash String?
+  name         String?
+  nameAr       String?
+  role         Role     @default(CUSTOMER)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  otpCodes        OtpCode[]
+  addresses       CustomerAddress[]
+  orders          Order[]                @relation("CustomerOrders")
+  pickedOrders    Order[]                @relation("PickerOrders")
+  drivenOrders    Order[]                @relation("DriverOrders")
+  subscription    CustomerSubscription?
+  promotionUsages PromotionUsage[]
+  notifications   Notification[]
+  favorites       Favorite[]
+  auditLogs       AuditLog[]
+
+  @@index([mobile])
+  @@index([email])
+  @@index([username])
+  @@index([role])
+  @@map("users")
+}
+
+model OtpCode {
+  id        String    @id @default(cuid())
+  userId    String
+  code      String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("otp_codes")
+}
+
+// ─── Address ──────────────────────────────────────────────────────
+
+model CustomerAddress {
+  id            String   @id @default(cuid())
+  customerId    String
+  label         String   @default("Home")
+  addressLine   String?
+  city          String?
+  deliveryNotes String?  @db.Text
+  latitude      Decimal  @db.Decimal(10, 8)
+  longitude     Decimal  @db.Decimal(11, 8)
+  isDefault     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  customer    User     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  orders      Order[]
+
+  @@index([customerId])
+  @@map("customer_addresses")
+}
+
+// ─── Branch ───────────────────────────────────────────────────────
+
+model Branch {
+  id        String   @id @default(cuid())
+  name      String
+  nameAr    String
+  address   String
+  latitude  Decimal  @db.Decimal(10, 8)
+  longitude Decimal  @db.Decimal(11, 8)
+  phone     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("branches")
+}
+
+// ─── Categories & Products ────────────────────────────────────────
+
+model Category {
+  id            String        @id @default(cuid())
+  name          String
+  nameAr        String
+  slug          String        @unique
+  imageUrl      String?       @db.Text
+  sortOrder     Int           @default(0)
+  isActive      Boolean       @default(true)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  subcategories Subcategory[]
+  products      Product[]
+  promotions    Promotion[]   @relation("CategoryPromotions")
+
+  @@index([slug])
+  @@index([isActive])
+  @@map("categories")
+}
+
+model Subcategory {
+  id         String    @id @default(cuid())
+  categoryId String
+  name       String
+  nameAr     String
+  slug       String    @unique
+  imageUrl   String?   @db.Text
+  sortOrder  Int       @default(0)
+  isActive   Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  category   Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  products   Product[]
+  promotions Promotion[] @relation("SubcategoryPromotions")
+
+  @@index([categoryId])
+  @@map("subcategories")
+}
+
+model Product {
+  id            String    @id @default(cuid())
+  categoryId    String
+  subcategoryId String?
+  name          String
+  nameAr        String
+  description   String?   @db.Text
+  descriptionAr String?   @db.Text
+  imageUrl      String?   @db.Text
+  isActive      Boolean   @default(true)
+  isFeatured    Boolean   @default(false)
+  hideFromHome  Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  category      Category      @relation(fields: [categoryId], references: [id])
+  subcategory   Subcategory?  @relation(fields: [subcategoryId], references: [id])
+  variants      ProductVariant[]
+  favorites     Favorite[]
+  promotions    Promotion[]   @relation("ProductPromotions")
+  featuredItems FeaturedSectionItem[]
+
+  @@index([categoryId])
+  @@index([subcategoryId])
+  @@index([isActive])
+  @@index([isFeatured])
+  @@index([hideFromHome])
+  @@map("products")
+}
+
+model ProductVariant {
+  id        String      @id @default(cuid())
+  productId String
+  type      VariantType
+  sku       String      @unique
+  barcode   String?
+  price     Decimal     @db.Decimal(10, 2)
+  stock     Int         @default(0)
+  reserved  Int         @default(0)
+  isActive  Boolean     @default(true)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  product    Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
+  promotions Promotion[] @relation("VariantPromotions")
+
+  @@index([productId])
+  @@index([sku])
+  @@index([isActive])
+  @@map("product_variants")
+}
+
+// ─── Orders ───────────────────────────────────────────────────────
+
+model Order {
+  id              String        @id @default(cuid())
+  orderNumber     String        @unique
+  customerId      String
+  addressId       String?
+  pickerId        String?
+  driverId        String?
+  status          OrderStatus   @default(NEW)
+  fulfillmentType FulfillmentType @default(DELIVERY)
+  paymentMethod   PaymentMethod
+  paymentStatus   PaymentStatus @default(PENDING)
+  subtotal        Decimal       @db.Decimal(10, 2)
+  discountTotal   Decimal       @db.Decimal(10, 2) @default(0)
+  deliveryFee     Decimal       @db.Decimal(10, 2) @default(0)
+  total           Decimal       @db.Decimal(10, 2)
+  notes           String?       @db.Text
+  replacementPreference String? @db.Text
+  paymentProofUrl String?
+  deliveryLat     Decimal?      @db.Decimal(10, 8)
+  deliveryLng     Decimal?      @db.Decimal(11, 8)
+  distanceKm      Decimal?      @db.Decimal(8, 2)
+  subscriptionApplied Boolean   @default(false)
+  rejectionReason String?
+
+  // Scheduled pickup (Pickup-from-Branch reservations). Only meaningful when
+  // fulfillmentType = PICKUP. ASAP orders leave these null.
+  pickupType               PickupType?     @default(ASAP)
+  scheduledPickupDate      DateTime?
+  scheduledPickupStartTime String?         // "HH:MM" snapshot
+  scheduledPickupEndTime   String?         // "HH:MM" snapshot
+  scheduledPickupSlotId    String?
+
+  // Optional curbside-pickup details (Pickup-from-Branch only). Customer can
+  // edit these AFTER placing the order; nothing is required.
+  carPlateNumber     String?
+  carBrand           String?
+  carColor           String?
+  pickupCustomerNote String?  @db.Text
+
+  deliveredAt     DateTime?
+  pickedUpAt      DateTime?
+  completedAt     DateTime?
+  confirmedAt     DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  customer        User             @relation("CustomerOrders", fields: [customerId], references: [id])
+  picker          User?            @relation("PickerOrders", fields: [pickerId], references: [id])
+  driver          User?            @relation("DriverOrders", fields: [driverId], references: [id])
+  address         CustomerAddress? @relation(fields: [addressId], references: [id])
+  pickupSlot      PickupTimeSlot?  @relation(fields: [scheduledPickupSlotId], references: [id], onDelete: SetNull)
+  items           OrderItem[]
+  orderPromotions OrderPromotion[]
+  statusHistory   OrderStatusHistory[]
+  notifications   Notification[]
+
+  @@index([customerId])
+  @@index([pickerId])
+  @@index([driverId])
+  @@index([status])
+  @@index([fulfillmentType])
+  @@index([orderNumber])
+  @@index([createdAt])
+  @@index([scheduledPickupDate])
+  @@index([scheduledPickupSlotId])
+  @@index([carPlateNumber])
+  @@map("orders")
+}
+
+// ─── Pickup reservation (admin-config + slot capacity) ───────────────
+
+model PickupSettings {
+  id                  String   @id @default(cuid())
+  futurePickupEnabled Boolean  @default(false)
+  // 0 = same day only, 1 = today + tomorrow, 3 = up to +3 days, etc.
+  maxReservationDays  Int      @default(0)
+  // "HH:MM". Once today's clock passes this, next-day reservations are refused.
+  cutoffTime          String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@map("pickup_settings")
+}
+
+model PickupTimeSlot {
+  id        String   @id @default(cuid())
+  label     String
+  startTime String   // "HH:MM"
+  endTime   String   // "HH:MM"
+  capacity  Int      @default(20)
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  orders    Order[]
+
+  @@index([isActive])
+  @@map("pickup_time_slots")
+}
+
+model OrderItem {
+  id               String          @id @default(cuid())
+  orderId          String
+  variantId        String
+  quantity         Int
+  unitPrice        Decimal         @db.Decimal(10, 2)
+  discountedPrice  Decimal?        @db.Decimal(10, 2)
+  total            Decimal         @db.Decimal(10, 2)
+  isFreeItem       Boolean         @default(false)
+  status           OrderItemStatus @default(PENDING)
+  replacedByItemId String?
+  notes            String?
+  createdAt        DateTime        @default(now())
+
+  order   Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variant ProductVariant @relation(fields: [variantId], references: [id])
+
+  @@index([orderId])
+  @@index([variantId])
+  @@map("order_items")
+}
+
+model OrderStatusHistory {
+  id        String      @id @default(cuid())
+  orderId   String
+  status    OrderStatus
+  note      String?
+  createdBy String?
+  createdAt DateTime    @default(now())
+
+  order     Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@map("order_status_history")
+}
+
+// ─── Promotions ───────────────────────────────────────────────────
+
+model Promotion {
+  id                    String        @id @default(cuid())
+  name                  String
+  nameAr                String
+  description           String?
+  descriptionAr         String?
+  type                  PromotionType
+  isActive              Boolean       @default(false)
+  isStackable           Boolean       @default(false)
+  priority              Int           @default(0)
+  startDate             DateTime
+  endDate               DateTime?
+  minimumCartValue      Decimal?      @db.Decimal(10, 2)
+  usageLimit            Int?
+  usageLimitPerCustomer Int?
+  usageCount            Int           @default(0)
+  requiresSubscription  Boolean       @default(false)
+  config                Json
+  targetScope           TargetScope   @default(ALL)
+  archivedAt            DateTime?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  targetProducts      Product[]        @relation("ProductPromotions")
+  targetVariants      ProductVariant[] @relation("VariantPromotions")
+  targetCategories    Category[]       @relation("CategoryPromotions")
+  targetSubcategories Subcategory[]    @relation("SubcategoryPromotions")
+  usages              PromotionUsage[]
+  orderPromotions     OrderPromotion[]
+  auditLogs           PromotionAuditLog[]
+
+  @@index([isActive, startDate])
+  @@index([type])
+  @@map("promotions")
+}
+
+model PromotionUsage {
+  id            String    @id @default(cuid())
+  promotionId   String
+  customerId    String
+  orderId       String
+  discountValue Decimal   @db.Decimal(10, 2)
+  usedAt        DateTime  @default(now())
+
+  promotion     Promotion @relation(fields: [promotionId], references: [id])
+  customer      User      @relation(fields: [customerId], references: [id])
+
+  @@index([promotionId, customerId])
+  @@map("promotion_usages")
+}
+
+model OrderPromotion {
+  id            String    @id @default(cuid())
+  orderId       String
+  promotionId   String
+  promotionName String
+  discountValue Decimal   @db.Decimal(10, 2)
+  freeItems     Json?
+
+  order         Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  promotion     Promotion @relation(fields: [promotionId], references: [id])
+
+  @@index([orderId])
+  @@map("order_promotions")
+}
+
+model PromotionAuditLog {
+  id          String    @id @default(cuid())
+  promotionId String
+  adminId     String
+  action      String
+  changes     Json?
+  createdAt   DateTime  @default(now())
+
+  promotion   Promotion @relation(fields: [promotionId], references: [id])
+
+  @@map("promotion_audit_logs")
+}
+
+// ─── Delivery Subscription ────────────────────────────────────────
+
+model SubscriptionPlan {
+  id                String                  @id @default(cuid())
+  name              String
+  nameAr            String
+  price             Decimal                 @db.Decimal(10, 2)
+  durationDays      Int
+  benefitType       SubscriptionBenefitType
+  discountValue     Decimal?                @db.Decimal(10, 2)
+  cappedFee         Decimal?                @db.Decimal(10, 2)
+  maxFreeDeliveries Int?
+  isActive          Boolean                 @default(true)
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+
+  subscriptions CustomerSubscription[]
+
+  @@map("subscription_plans")
+}
+
+model CustomerSubscription {
+  id               String             @id @default(cuid())
+  customerId       String             @unique
+  planId           String
+  startDate        DateTime
+  expiryDate       DateTime
+  status           SubscriptionStatus @default(PENDING_PAYMENT)
+  deliveriesUsed   Int                @default(0)
+  paymentMethod    String
+  adminConfirmedAt DateTime?
+  adminConfirmedBy String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  customer         User             @relation(fields: [customerId], references: [id])
+  plan             SubscriptionPlan @relation(fields: [planId], references: [id])
+
+  @@index([customerId, status])
+  @@map("customer_subscriptions")
+}
+
+// ─── Settings ─────────────────────────────────────────────────────
+
+model DeliveryPricingSettings {
+  id                         String   @id @default(cuid())
+  deliveryEnabled            Boolean  @default(true)
+  distancePricingEnabled     Boolean  @default(false)
+  distanceRulesEnabled       Boolean  @default(false)
+  maxDeliveryKm              Decimal? @db.Decimal(6, 2)
+  baseFee                    Decimal  @db.Decimal(10, 2)
+  feePerKm                   Decimal  @db.Decimal(10, 2)
+  minimumFee                 Decimal  @db.Decimal(10, 2)
+  maximumFee                 Decimal  @db.Decimal(10, 2)
+  freeDeliveryEnabled        Boolean  @default(false)
+  freeDeliveryThreshold      Decimal? @db.Decimal(10, 2)
+  thresholdForSubscribers    Boolean  @default(true)
+  thresholdForNonSubscribers Boolean  @default(true)
+  updatedAt                  DateTime @updatedAt
+
+  @@map("delivery_pricing_settings")
+}
+
+model DeliveryDistanceRule {
+  id           String   @id @default(cuid())
+  minKm        Decimal  @db.Decimal(6, 2)
+  maxKm        Decimal? @db.Decimal(6, 2)
+  fee          Decimal  @db.Decimal(10, 2) @default(0)
+  outOfService Boolean  @default(false)
+
+  // Optional percentage discount on the delivery fee, only applied when the
+  // current date falls inside [discountStartDate, discountEndDate] — either
+  // bound may be null to leave that end open.
+  discountPercent   Decimal?  @db.Decimal(5, 2)
+  discountStartDate DateTime?
+  discountEndDate   DateTime?
+
+  // Optional basket-threshold override. When the customer's cart subtotal
+  // meets basketThreshold and feeAboveThreshold is also set, that fee is
+  // used in place of `fee`. Both must be filled for the override to apply.
+  basketThreshold   Decimal? @db.Decimal(10, 2)
+  feeAboveThreshold Decimal? @db.Decimal(10, 2)
+
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([sortOrder])
+  @@map("delivery_distance_rules")
+}
+
+model MinimumOrderSettings {
+  id            String   @id @default(cuid())
+  enabled       Boolean  @default(false)
+  minimumAmount Decimal  @db.Decimal(10, 2)
+  updatedAt     DateTime @updatedAt
+
+  @@map("minimum_order_settings")
+}
+
+// ─── Banners ──────────────────────────────────────────────────────
+
+model Banner {
+  id        String   @id @default(cuid())
+  title     String
+  titleAr   String
+  imageUrl  String   @db.Text
+  linkType  String?
+  linkValue String?  @db.Text
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("banners")
+}
+
+// ─── Notifications ────────────────────────────────────────────────
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  orderId   String?
+  type      NotificationType
+  title     String
+  body      String
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order     Order?           @relation(fields: [orderId], references: [id])
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+// ─── Featured Sections ────────────────────────────────────────────
+
+model FeaturedSection {
+  id        String   @id @default(cuid())
+  name      String
+  nameAr    String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items     FeaturedSectionItem[]
+
+  @@map("featured_sections")
+}
+
+model FeaturedSectionItem {
+  id        String   @id @default(cuid())
+  sectionId String
+  productId String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  section   FeaturedSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  product   Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([sectionId, productId])
+  @@index([sectionId])
+  @@map("featured_section_items")
+}
+
+// ─── Audit Logs ───────────────────────────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  actorRole  String?
+  action     String
+  entityType String
+  entityId   String?
+  changes    Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId])
+  @@index([entityType, entityId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ─── Favorites ────────────────────────────────────────────────────
+
+model Favorite {
+  id         String   @id @default(cuid())
+  customerId String
+  productId  String
+  createdAt  DateTime @default(now())
+
+  customer   User    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  product    Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, productId])
+  @@map("favorites")
+}
