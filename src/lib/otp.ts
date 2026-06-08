@@ -1,6 +1,7 @@
 import { config } from '../config';
 
 export function generateOtpCode(): string {
+  if (config.otp.override) return config.otp.override;
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 

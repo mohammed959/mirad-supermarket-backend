@@ -12,6 +12,10 @@ export const config = {
   },
   otp: {
     expiresMinutes: parseInt(process.env.OTP_EXPIRES_MINUTES ?? '5', 10),
+    // TEMPORARY: when set, every generated customer OTP is forced to this
+    // value (e.g. "123456") so testers can sign in without SMS. Unset in
+    // production to restore random per-request OTPs.
+    override: process.env.DEV_OTP_OVERRIDE?.trim() || null,
   },
   bunny: {
     // Products: ${productBaseUrl}/{sku}.${productExtension}
