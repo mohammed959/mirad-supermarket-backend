@@ -40,6 +40,9 @@ export interface ProductListOptions {
   brandId?: string;
   featured?: boolean;
   search?: string;
+  /** Restrict to a specific set of product ids (used by the cart to resolve
+   *  current localized names). Bypasses the active/stock browse gates. */
+  ids?: string[];
   page?: number;
   limit?: number;
   includeOutOfStock?: boolean;
@@ -61,6 +64,7 @@ export async function listProducts(opts: ProductListOptions = {}) {
     brandId,
     featured,
     search,
+    ids,
     page = 1,
     limit = 20,
     includeOutOfStock = false,
@@ -68,8 +72,13 @@ export async function listProducts(opts: ProductListOptions = {}) {
     excludeHiddenFromHome = false,
   } = opts;
 
+  // Explicit id lookups (e.g. the cart) must return the requested products
+  // regardless of active/stock state, so they bypass the browse gates.
+  const byIds = Array.isArray(ids) && ids.length > 0;
+
   const where: Prisma.ProductWhereInput = {
-    ...(!includeInactive && { isActive: true }),
+    ...(byIds && { id: { in: ids } }),
+    ...(!includeInactive && !byIds && { isActive: true }),
     ...(excludeHiddenFromHome && { hideFromHome: false }),
     ...(categoryId && { categoryId }),
     ...(subcategoryId && { subcategoryId }),
@@ -83,8 +92,9 @@ export async function listProducts(opts: ProductListOptions = {}) {
         { barcode: { contains: search } },
       ],
     }),
-    // Browsing hides products with zero available stock; admin / search bypasses this.
-    ...(!includeInactive && !includeOutOfStock && {
+    // Browsing hides products with zero available stock; admin / search / id
+    // lookups bypass this.
+    ...(!includeInactive && !includeOutOfStock && !byIds && {
       stock: { gt: 0 },
     }),
   };
@@ -115,13 +125,15 @@ export async function getProductById(id: string) {
 }
 
 export async function createProduct(data: CreateProductInput) {
-  await assertBrandExists(data.brandId);
+  // Brand is optional — only validate/link it when one was provided.
+  const brandId = data.brandId?.trim() || undefined;
+  if (brandId) await assertBrandExists(brandId);
   await ensureSkuUnique(data.sku);
   return prisma.product.create({
     data: {
       categoryId: data.categoryId,
       subcategoryId: data.subcategoryId,
-      brandId: data.brandId,
+      brandId: brandId ?? null,
       name: data.name,
       nameAr: data.nameAr,
       description: data.description,
@@ -148,7 +160,11 @@ export async function updateProduct(id: string, data: UpdateProductInput) {
       ? { connect: { id: data.subcategoryId } }
       : { disconnect: true };
   }
-  if (data.brandId !== undefined) payload.brand = { connect: { id: data.brandId } };
+  // Brand optional: a value connects it, an empty value clears it.
+  if (data.brandId !== undefined) {
+    const brandId = data.brandId?.trim();
+    payload.brand = brandId ? { connect: { id: brandId } } : { disconnect: true };
+  }
   if (data.name !== undefined) payload.name = data.name;
   if (data.nameAr !== undefined) payload.nameAr = data.nameAr;
   if (data.description !== undefined) payload.description = data.description;

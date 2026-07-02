@@ -42,6 +42,8 @@ router.delete('/:id/car-pickup-details',
 
 // Staff actions
 router.patch('/:id/status', authenticateStaff, asyncHandler(ctrl.changeStatus));
+// Driver confirms receipt of products before starting the journey.
+router.patch('/:id/confirm-received', authenticateStaff, authorize('DRIVER', 'SUPER_ADMIN'), asyncHandler(ctrl.confirmReceived));
 router.patch('/:id/assign-picker', authenticateStaff, authorize('SUPER_ADMIN'), asyncHandler(ctrl.assignPicker));
 router.patch('/:id/assign-driver', authenticateStaff, authorize('SUPER_ADMIN'), asyncHandler(ctrl.assignDriver));
 router.patch('/:id/reject', authenticateStaff, authorize('SUPER_ADMIN'), asyncHandler(ctrl.reject));
@@ -55,6 +57,11 @@ router.patch('/:id/items/:itemId/status',
 router.post('/:id/items/:itemId/replace',
   authenticateStaff, authorize('PICKER', 'SUPER_ADMIN'),
   asyncHandler(ctrl.replaceItem)
+);
+// Cancel/undo the action taken on an item (revert to PENDING).
+router.post('/:id/items/:itemId/reset',
+  authenticateStaff, authorize('PICKER', 'SUPER_ADMIN'),
+  asyncHandler(ctrl.resetItem)
 );
 
 export default router;

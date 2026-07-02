@@ -731,12 +731,13 @@ export async function updateOrderStatus(
   orderId: string,
   status: OrderStatus,
   actorId: string,
-  note?: string
+  note?: string,
+  actorRole?: string
 ) {
   return prisma.$transaction(async (tx) => {
     const existing = await tx.order.findUnique({
       where: { id: orderId },
-      select: { fulfillmentType: true },
+      select: { fulfillmentType: true, status: true, driverId: true, driverConfirmedAt: true },
     });
     if (!existing) throw new Error('Order not found');
 
@@ -745,6 +746,31 @@ export async function updateOrderStatus(
     }
     if (existing.fulfillmentType === 'DELIVERY' && PICKUP_ONLY_STATUSES.includes(status)) {
       throw new Error(`Delivery orders cannot move to ${status}.`);
+    }
+
+    // Driver delivery workflow is strictly sequential and enforced here.
+    // (Admins keep manual control — these guards only apply to DRIVER actors.)
+    if (actorRole === 'DRIVER') {
+      if (existing.driverId !== actorId) {
+        throw new Error('This order is not assigned to you.');
+      }
+      if (existing.status === 'CANCELLED' || existing.status === 'REJECTED') {
+        throw new Error('This order has been cancelled and can no longer be delivered.');
+      }
+      if (!['OUT_FOR_DELIVERY', 'DELIVERED'].includes(status)) {
+        throw new Error('Drivers can only start the journey or complete the delivery.');
+      }
+      if (status === 'OUT_FOR_DELIVERY') {
+        if (existing.status !== 'ASSIGNED_TO_DRIVER') {
+          throw new Error('The order is not ready to start the journey.');
+        }
+        if (!existing.driverConfirmedAt) {
+          throw new Error('Confirm you have received the products before starting the journey.');
+        }
+      }
+      if (status === 'DELIVERED' && existing.status !== 'OUT_FOR_DELIVERY') {
+        throw new Error('Start the journey before completing the delivery.');
+      }
     }
 
     const order = await tx.order.update({
@@ -816,7 +842,55 @@ export async function updateOrderStatus(
   });
 }
 
+/**
+ * Driver confirms "I have received the products and the order is ready for
+ * delivery." Gates the OUT_FOR_DELIVERY (start journey) transition. Only the
+ * assigned driver (or an admin) may confirm, and only while the order is
+ * ASSIGNED_TO_DRIVER.
+ */
+export async function confirmProductsReceived(
+  orderId: string,
+  actor: { userId: string; role: string },
+) {
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { id: true, driverId: true, status: true, fulfillmentType: true, orderNumber: true },
+  });
+  if (!order) throw new Error('Order not found');
+  if (order.fulfillmentType !== 'DELIVERY') {
+    throw new Error('Only delivery orders require driver confirmation.');
+  }
+  if (actor.role === 'DRIVER' && order.driverId !== actor.userId) {
+    throw new Error('This order is not assigned to you.');
+  }
+  if (order.status !== 'ASSIGNED_TO_DRIVER') {
+    throw new Error('This order is not awaiting driver confirmation.');
+  }
+  const updated = await prisma.order.update({
+    where: { id: orderId },
+    data: { driverConfirmedAt: new Date() },
+  });
+  await logAction({
+    actorId: actor.userId, actorRole: actor.role,
+    action: 'order.driver.confirm_received',
+    entityType: 'order', entityId: orderId,
+    changes: { orderNumber: order.orderNumber },
+  });
+  return updated;
+}
+
+/** Shared guard: a cancelled/rejected order cannot be assigned until an admin
+ *  moves it back to an active status. */
+async function assertAssignable(orderId: string) {
+  const order = await prisma.order.findUnique({ where: { id: orderId }, select: { status: true } });
+  if (!order) throw new Error('Order not found');
+  if (order.status === 'CANCELLED' || order.status === 'REJECTED') {
+    throw new Error('This order is cancelled. You cannot assign it unless status is changed.');
+  }
+}
+
 export async function assignPicker(orderId: string, pickerId: string, actorId: string) {
+  await assertAssignable(orderId);
   return updateOrderStatus(orderId, 'ASSIGNED_TO_PICKER', actorId, `Assigned to picker ${pickerId}`)
     .then(() =>
       prisma.order.update({
@@ -835,6 +909,7 @@ export async function assignDriver(orderId: string, driverId: string, actorId: s
   if (order.fulfillmentType === 'PICKUP') {
     throw new Error('Pickup orders cannot be assigned to a driver. Switch the order to delivery first.');
   }
+  await assertAssignable(orderId);
   return updateOrderStatus(orderId, 'ASSIGNED_TO_DRIVER', actorId, `Assigned to driver ${driverId}`)
     .then(() =>
       prisma.order.update({
@@ -845,6 +920,9 @@ export async function assignDriver(orderId: string, driverId: string, actorId: s
 }
 
 /** Statuses where a customer can still cancel the order themselves. */
+// Customer may cancel any time up to (but not including) the driver starting
+// the journey — i.e. everything before OUT_FOR_DELIVERY. A driver-assigned
+// order that hasn't started yet is still cancellable.
 const CUSTOMER_CANCELLABLE: OrderStatus[] = [
   'NEW',
   'PAYMENT_VERIFIED',
@@ -852,6 +930,7 @@ const CUSTOMER_CANCELLABLE: OrderStatus[] = [
   'PICKING_IN_PROGRESS',
   'READY_FOR_DELIVERY',
   'READY_FOR_PICKUP',
+  'ASSIGNED_TO_DRIVER',
 ];
 
 export async function cancelOwnOrder(customerId: string, orderId: string, reason?: string) {
@@ -1061,6 +1140,96 @@ export async function replaceOrderItem(
 }
 
 /**
+ * Cancel/undo the action taken on an order item and return it to PENDING so
+ * the picker can choose again (e.g. found the original after replacing it).
+ *
+ *  - REPLACED  → delete the replacement row (release its reservation) and
+ *                re-reserve the original. No stale/duplicate replacement rows.
+ *  - UNAVAILABLE → re-reserve the original.
+ *  - PICKED / PENDING → already reserved; just clear the decision.
+ *
+ * The customer's order item itself is never deleted — only the action on it is
+ * undone. Not allowed once the order has left picking.
+ */
+export async function resetOrderItemAction(
+  orderId: string,
+  itemId: string,
+  actor: { userId: string; role: string },
+) {
+  return prisma.$transaction(async (tx) => {
+    await assertCanPick(tx, orderId, actor);
+    const item = await tx.orderItem.findFirst({ where: { id: itemId, orderId } });
+    if (!item) throw new Error('Order item not found');
+
+    // A replacement row cannot be reset directly — reset the original instead.
+    const isReplacementRow = Boolean(
+      await tx.orderItem.findFirst({ where: { orderId, replacedByItemId: itemId }, select: { id: true } }),
+    );
+    if (isReplacementRow) {
+      throw new Error('Cancel the replacement from its original item.');
+    }
+
+    if (item.status === 'PENDING') return item; // nothing to undo
+
+    // Undo a replacement: remove the substitute row and restore the original.
+    if (item.status === 'REPLACED') {
+      if (item.replacedByItemId) {
+        const replacement = await tx.orderItem.findUnique({ where: { id: item.replacedByItemId } });
+        if (replacement) {
+          // Release the replacement's reservation (it was PICKED = active).
+          if (replacement.status === 'PENDING' || replacement.status === 'PICKED') {
+            if (replacement.productId) {
+              await tx.product.update({
+                where: { id: replacement.productId },
+                data: { reserved: { decrement: replacement.quantity } },
+              });
+            } else if (replacement.variantId) {
+              await tx.productVariant.update({
+                where: { id: replacement.variantId },
+                data: { reserved: { decrement: replacement.quantity } },
+              });
+            }
+          }
+          await tx.orderItem.delete({ where: { id: replacement.id } });
+        }
+      }
+    }
+
+    // Re-reserve the original when it was in an inactive state (REPLACED /
+    // UNAVAILABLE released the reservation). PICKED stays reserved.
+    if (item.status === 'REPLACED' || item.status === 'UNAVAILABLE') {
+      if (item.productId) {
+        await tx.product.update({
+          where: { id: item.productId },
+          data: { reserved: { increment: item.quantity } },
+        });
+      } else if (item.variantId) {
+        await tx.productVariant.update({
+          where: { id: item.variantId },
+          data: { reserved: { increment: item.quantity } },
+        });
+      }
+    }
+
+    const updated = await tx.orderItem.update({
+      where: { id: itemId },
+      data: { status: 'PENDING', replacedByItemId: null, notes: null },
+    });
+
+    await recomputeOrderTotals(tx, orderId);
+
+    await logAction({
+      actorId: actor.userId, actorRole: actor.role,
+      action: 'order.item.reset',
+      entityType: 'order_item', entityId: itemId,
+      changes: { orderId, from: item.status },
+    }, tx);
+
+    return updated;
+  });
+}
+
+/**
  * Phase 6 buy-again: aggregate the customer's purchase history at the
  * product level. New flat orders contribute via `productId`; legacy
  * variant rows are resolved through their parent product so a single
@@ -1186,6 +1355,7 @@ export async function buildReorderCart(customerId: string, orderId: string) {
   const items: Array<{
     productId: string;
     productName: string;
+    productNameAr: string | null;
     productImage: string | null;
     price: number;
     quantity: number;
@@ -1224,6 +1394,7 @@ export async function buildReorderCart(customerId: string, orderId: string) {
     items.push({
       productId: product.id,
       productName: product.name,
+      productNameAr: product.nameAr ?? null,
       productImage: getProductImageUrl(product.sku ?? item.productSku),
       price: currentPrice,
       quantity: item.quantity,

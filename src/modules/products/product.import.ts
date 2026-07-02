@@ -7,8 +7,8 @@ import { logAction } from '../audit/audit.service';
  * accepted; price, quantity, SKU and barcode are product-level columns.
  *
  * Spec columns (case-insensitive, whitespace/underscore tolerant):
- *   Required: name, nameAr, brand (slug), category (slug or name), sku, price, quantity
- *   Optional: description, descriptionAr, subcategory (slug or name), barcode, featured
+ *   Required: name, nameAr, category (slug or name), sku, price, quantity
+ *   Optional: brand (slug), description, descriptionAr, subcategory (slug or name), barcode, featured
  *
  * Header aliases below let operators paste from a variety of
  * spreadsheets while still mapping to a single canonical field.
@@ -240,19 +240,20 @@ export async function importProductsFromExcel(buffer: Buffer, actorId: string): 
       continue;
     }
 
-    // Brand — required, must exist AND be active
-    if (!row.brandSlug) {
-      errors.push({ rowNumber: row.rowNumber, field: 'brand', message: 'Brand is required — every product must belong to a brand.' });
-      continue;
-    }
-    const brand = brandBySlug.get(row.brandSlug.toLowerCase());
-    if (!brand) {
-      errors.push({ rowNumber: row.rowNumber, field: 'brand', message: `Brand "${row.brandSlug}" not found — create it before importing.` });
-      continue;
-    }
-    if (!brand.isActive) {
-      errors.push({ rowNumber: row.rowNumber, field: 'brand', message: `Brand "${row.brandSlug}" is inactive — re-activate it before importing.` });
-      continue;
+    // Brand — OPTIONAL. Empty ⇒ product has no brand. When provided it must
+    // exist and be active.
+    let brandId: string | null = null;
+    if (row.brandSlug) {
+      const brand = brandBySlug.get(row.brandSlug.toLowerCase());
+      if (!brand) {
+        errors.push({ rowNumber: row.rowNumber, field: 'brand', message: `Brand "${row.brandSlug}" not found — create it before importing.` });
+        continue;
+      }
+      if (!brand.isActive) {
+        errors.push({ rowNumber: row.rowNumber, field: 'brand', message: `Brand "${row.brandSlug}" is inactive — re-activate it before importing.` });
+        continue;
+      }
+      brandId = brand.id;
     }
 
     // Subcategory — optional. When provided, match it against the chosen
@@ -325,7 +326,7 @@ export async function importProductsFromExcel(buffer: Buffer, actorId: string): 
           isFeatured: Boolean(row.featured),
           categoryId: cat.id,
           subcategoryId: subId,
-          brandId: brand.id,
+          brandId,
           sku,
           // Fully optional — empty stays null (no validation, non-unique).
           barcode: row.barcode?.trim() || null,

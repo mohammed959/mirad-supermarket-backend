@@ -388,6 +388,9 @@ model Order {
   carColor           String?
   pickupCustomerNote String?  @db.Text
 
+  // Set when the assigned driver confirms "I have received the products".
+  // Required before the driver can start the journey (OUT_FOR_DELIVERY).
+  driverConfirmedAt DateTime?
   deliveredAt     DateTime?
   pickedUpAt      DateTime?
   completedAt     DateTime?

@@ -3,8 +3,8 @@ import { z } from 'zod';
 /**
  * Phase 1 product schema — flat: no variants array.
  *
- * Required: brand, category, price, quantity, sku, names (en+ar).
- * Optional: subcategory, descriptions, barcode, isFeatured, hideFromHome.
+ * Required: category, price, quantity, sku, names (en+ar).
+ * Optional: brand, subcategory, descriptions, barcode, isFeatured, hideFromHome.
  *
  * SKU and barcode are validated at the product level. SKU is unique
  * across products; the DB enforces this via a UNIQUE constraint.
@@ -12,7 +12,8 @@ import { z } from 'zod';
 export const createProductSchema = z.object({
   categoryId: z.string().min(1),
   subcategoryId: z.string().optional(),
-  brandId: z.string().min(1, 'brandId is required — every product must belong to a brand'),
+  // Brand is optional. Empty string is treated as "no brand".
+  brandId: z.string().trim().optional(),
   name: z.string().min(1).max(200),
   nameAr: z.string().min(1).max(200),
   description: z.string().max(2000).optional(),

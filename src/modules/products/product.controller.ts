@@ -20,6 +20,7 @@ export async function list(req: Request, res: Response): Promise<void> {
     brandId: qs(req.query.brandId),
     featured: req.query.featured === 'true' ? true : undefined,
     search: qs(req.query.q),
+    ids: qs(req.query.ids)?.split(',').map((s) => s.trim()).filter(Boolean),
     page: parseInt(qs(req.query.page) ?? '1') || 1,
     limit,
     includeOutOfStock: req.query.includeOutOfStock === 'true',

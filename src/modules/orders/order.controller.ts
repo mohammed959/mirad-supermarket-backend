@@ -52,7 +52,10 @@ export async function getOne(req: AuthRequest, res: Response): Promise<void> {
         carPlateNumber?: string | null; carBrand?: string | null;
         carColor?: string | null; pickupCustomerNote?: string | null;
       };
-    ok(res, rest);
+    // Enforce "no map / navigation before Start Journey": withhold the exact
+    // delivery coordinates from the driver until the order is out for delivery.
+    const journeyStarted = order.status === 'OUT_FOR_DELIVERY' || order.status === 'DELIVERED';
+    ok(res, journeyStarted ? rest : { ...rest, deliveryLat: null, deliveryLng: null });
     return;
   }
 
@@ -221,8 +224,24 @@ export async function adminListFuture(req: AuthRequest, res: Response): Promise<
 
 export async function changeStatus(req: AuthRequest, res: Response): Promise<void> {
   const { status, note } = updateStatusSchema.parse(req.body);
-  const order = await svc.updateOrderStatus(req.params.id, status, req.user!.userId, note);
-  ok(res, order);
+  try {
+    const order = await svc.updateOrderStatus(req.params.id, status, req.user!.userId, note, req.user!.role);
+    ok(res, order);
+  } catch (err) {
+    badRequest(res, (err as Error).message);
+  }
+}
+
+export async function confirmReceived(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const order = await svc.confirmProductsReceived(req.params.id, {
+      userId: req.user!.userId,
+      role: req.user!.role,
+    });
+    ok(res, order, 'Products confirmed. You can start the journey.');
+  } catch (err) {
+    badRequest(res, (err as Error).message);
+  }
 }
 
 export async function assignPicker(req: AuthRequest, res: Response): Promise<void> {
@@ -314,8 +333,19 @@ export async function reorder(req: AuthRequest, res: Response): Promise<void> {
 
 export async function setItemStatus(req: AuthRequest, res: Response): Promise<void> {
   const status = (req.body?.status ?? '') as string;
-  if (!['PICKED', 'UNAVAILABLE', 'REMOVED'].includes(status)) {
-    badRequest(res, "status must be PICKED, UNAVAILABLE, or REMOVED");
+  // Pickers can only confirm picking (PICKED) or mark an item as not-exist
+  // (UNAVAILABLE). They cannot delete/cancel items (REMOVED) — replacing is a
+  // separate action. Admins retain the full set for exceptional corrections.
+  const allowed = req.user!.role === 'PICKER'
+    ? ['PICKED', 'UNAVAILABLE']
+    : ['PICKED', 'UNAVAILABLE', 'REMOVED'];
+  if (!allowed.includes(status)) {
+    badRequest(
+      res,
+      req.user!.role === 'PICKER'
+        ? 'status must be PICKED or UNAVAILABLE'
+        : 'status must be PICKED, UNAVAILABLE, or REMOVED',
+    );
     return;
   }
   try {
@@ -326,6 +356,15 @@ export async function setItemStatus(req: AuthRequest, res: Response): Promise<vo
       req.user!
     );
     ok(res, data);
+  } catch (err) {
+    badRequest(res, (err as Error).message);
+  }
+}
+
+export async function resetItem(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const data = await svc.resetOrderItemAction(req.params.id, req.params.itemId, req.user!);
+    ok(res, data, 'Item action cancelled');
   } catch (err) {
     badRequest(res, (err as Error).message);
   }
