@@ -60,6 +60,13 @@ const latLngSchema = z.object({
 // A polygon ring needs >= 3 vertices. `null` clears it; omitting it leaves
 // the stored value untouched.
 const polygonSchema = z.array(latLngSchema).min(3);
+// A named coverage area: at least one of name/nameAr must be non-empty
+// (enforced in the service) plus a valid polygon.
+const areaSchema = z.object({
+  name: z.string(),
+  nameAr: z.string(),
+  polygon: polygonSchema,
+});
 
 const branchSchema = z.object({
   name: z.string().min(1),
@@ -68,9 +75,29 @@ const branchSchema = z.object({
   latitude: z.number().min(-90).max(90),
   longitude: z.number().min(-180).max(180),
   phone: z.string().nullable().optional(),
-  deliveryPolygon: polygonSchema.nullable().optional(),
+  deliveryAreas: z.array(areaSchema).nullable().optional(),
   excludedPolygons: z.array(polygonSchema).nullable().optional(),
 });
+
+/**
+ * Public marketplace-access gate check. Validates coordinate ranges then asks
+ * the service whether the point falls in a supported city. No auth required —
+ * customers hit this before login on their first marketplace visit.
+ */
+const coverageCheckSchema = z.object({
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+});
+
+export async function checkCoverage(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const { lat, lng } = coverageCheckSchema.parse(req.body);
+    const result = await svc.checkCoverage(lat, lng);
+    ok(res, result);
+  } catch (err) {
+    badRequest(res, (err as Error).message);
+  }
+}
 
 export async function upsertBranch(req: AuthRequest, res: Response): Promise<void> {
   try {

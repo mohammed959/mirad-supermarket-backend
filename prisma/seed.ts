@@ -6,19 +6,56 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('Seeding database...');
 
-  // Branch
+  // Branch — located among the supported Al-Qassim cities. `deliveryAreas`
+  // seeds one named coverage polygon per supported city so the marketplace
+  // access gate works out of the box; the admin refines these in
+  // /admin/branch-coverage. Squares are ~±0.03° (~3 km) around each centre.
+  const deliveryAreas = [
+    {
+      name: 'Riyadh Al Khabra',
+      nameAr: 'رياض الخبراء',
+      polygon: [
+        { lat: 25.825, lng: 44.038 },
+        { lat: 25.825, lng: 44.098 },
+        { lat: 25.765, lng: 44.098 },
+        { lat: 25.765, lng: 44.038 },
+      ],
+    },
+    {
+      name: 'Bukayriyah',
+      nameAr: 'البكيرية',
+      polygon: [
+        { lat: 26.169, lng: 43.628 },
+        { lat: 26.169, lng: 43.688 },
+        { lat: 26.109, lng: 43.688 },
+        { lat: 26.109, lng: 43.628 },
+      ],
+    },
+    {
+      name: 'Al Khabra',
+      nameAr: 'الخبراء',
+      polygon: [
+        { lat: 25.733, lng: 43.714 },
+        { lat: 25.733, lng: 43.774 },
+        { lat: 25.673, lng: 43.774 },
+        { lat: 25.673, lng: 43.714 },
+      ],
+    },
+  ];
+
   const branch = await prisma.branch.upsert({
     where: { id: 'branch-main' },
-    update: {},
+    update: { deliveryAreas },
     create: {
       id: 'branch-main',
       name: 'Al-Hathlul Main Branch',
       nameAr: 'فرع الهذلول الرئيسي',
-      address: 'Riyadh, Saudi Arabia',
-      latitude: 24.7136,
-      longitude: 46.6753,
+      address: 'Riyadh Al Khabra, Al-Qassim, Saudi Arabia',
+      latitude: 25.795,
+      longitude: 44.068,
       phone: '+966500000000',
       isActive: true,
+      deliveryAreas,
     },
   });
 

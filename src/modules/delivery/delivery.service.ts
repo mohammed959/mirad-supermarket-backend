@@ -3,10 +3,12 @@ import { prisma } from '../../lib/prisma';
 import {
   LatLng,
   Polygon,
+  NamedArea,
   normalizePolygon,
   normalizePolygons,
-  pointInPolygon,
+  normalizeAreas,
   pointInAnyPolygon,
+  findContainingArea,
   isPolygonInsidePolygon,
 } from '../../lib/geo';
 
@@ -67,6 +69,10 @@ export interface DeliveryQuoteResult {
     /** SAR amount knocked off by the discount (already reflected in `fee`). */
     discountAmount: number;
   } | null;
+  /** Name of the coverage area (city) the customer's location falls inside,
+   *  or null when outside all areas / no location supplied. */
+  coverageAreaName: string | null;
+  coverageAreaNameAr: string | null;
   maxDeliveryKm: number | null;
   /** True when the customer is within the max delivery distance — subscription
    *  plans can only be offered/used when this is true. */
@@ -193,6 +199,8 @@ async function computeDeliveryQuote(opts: QuoteOpts): Promise<DeliveryQuoteResul
     pricingRuleApplied: 'NONE',
     hasActiveSubscription,
     availableFulfillmentTypes: ['PICKUP'],
+    coverageAreaName: null,
+    coverageAreaNameAr: null,
   };
 
   if (!branch) {
@@ -214,14 +222,14 @@ async function computeDeliveryQuote(opts: QuoteOpts): Promise<DeliveryQuoteResul
   }
 
   // ── Polygon-based coverage (replaces radius / maxDeliveryKm) ──────
-  // The main delivery polygon defines the serviceable area; excluded
-  // polygons carve out unreachable zones inside it. Distance is still
-  // computed below, but ONLY for fee pricing (distance-rule tiers) — it no
-  // longer decides whether delivery is available.
-  const mainPolygon = normalizePolygon(branch.deliveryPolygon);
+  // Named service areas define the serviceable region; a customer is covered
+  // when inside ANY area's polygon. Excluded polygons carve out unreachable
+  // zones inside them. Distance is still computed below, but ONLY for fee
+  // pricing (distance-rule tiers) — it no longer decides availability.
+  const areas = normalizeAreas(branch.deliveryAreas);
   const excludedPolygons = normalizePolygons(branch.excludedPolygons);
 
-  if (!mainPolygon) {
+  if (areas.length === 0) {
     return {
       ...baseQuote,
       reason: 'AREA_NOT_CONFIGURED',
@@ -258,8 +266,9 @@ async function computeDeliveryQuote(opts: QuoteOpts): Promise<DeliveryQuoteResul
 
   const customerPoint: LatLng = { lat: opts.customerLat!, lng: opts.customerLng! };
 
-  // Inside the main service area?
-  if (!pointInPolygon(customerPoint, mainPolygon)) {
+  // Inside any named service area?
+  const area = findContainingArea(customerPoint, areas);
+  if (!area) {
     return {
       ...baseQuote,
       reason: 'OUT_OF_AREA',
@@ -282,6 +291,8 @@ async function computeDeliveryQuote(opts: QuoteOpts): Promise<DeliveryQuoteResul
 
   // Inside coverage ⇒ subscribable and deliverable; the fee is decided below.
   baseQuote.subscriptionEligible = true;
+  baseQuote.coverageAreaName = area.name;
+  baseQuote.coverageAreaNameAr = area.nameAr;
 
   // SUBSCRIPTION PATH — bypass distance rules, apply the plan's benefit.
   if (hasActiveSubscription) {
@@ -458,10 +469,49 @@ export async function getBranch() {
       latitude: Number(branch.latitude),
       longitude: Number(branch.longitude),
       phone: branch.phone,
-      deliveryPolygon: normalizePolygon(branch.deliveryPolygon),
+      deliveryAreas: normalizeAreas(branch.deliveryAreas),
       excludedPolygons: normalizePolygons(branch.excludedPolygons),
     },
   };
+}
+
+/** A named coverage area as accepted from the admin (unnormalized). */
+export interface AreaInput {
+  name: string;
+  nameAr: string;
+  polygon: LatLng[];
+}
+
+/**
+ * Purely geographic coverage check for the marketplace-access gate. Answers
+ * "does this lat/lng fall inside a supported city?" — independent of whether
+ * home delivery is enabled or priced (that's the quote's job). Used by the
+ * public gate before login, so it must not require auth or a cart.
+ *
+ * A location is covered when it's inside ANY delivery area AND not inside an
+ * excluded ring. When no areas are configured we report `configured: false`
+ * so the frontend can fail open rather than lock every customer out.
+ */
+export async function checkCoverage(lat: number, lng: number): Promise<{
+  configured: boolean;
+  covered: boolean;
+  area: { name: string; nameAr: string } | null;
+}> {
+  const branch = await prisma.branch.findFirst({ where: { isActive: true } });
+  const areas = branch ? normalizeAreas(branch.deliveryAreas) : [];
+  if (areas.length === 0) {
+    return { configured: false, covered: false, area: null };
+  }
+  const point: LatLng = { lat, lng };
+  const area = findContainingArea(point, areas);
+  if (!area) {
+    return { configured: true, covered: false, area: null };
+  }
+  const excludedPolygons = normalizePolygons(branch!.excludedPolygons);
+  if (pointInAnyPolygon(point, excludedPolygons)) {
+    return { configured: true, covered: false, area: null };
+  }
+  return { configured: true, covered: true, area: { name: area.name, nameAr: area.nameAr } };
 }
 
 export interface UpsertBranchInput {
@@ -471,43 +521,52 @@ export interface UpsertBranchInput {
   latitude: number;
   longitude: number;
   phone?: string | null;
-  /** Main delivery service area. `null` clears it (delivery becomes
+  /** Named delivery/coverage areas. `null`/`[]` clears them (coverage becomes
    *  unavailable). `undefined` leaves the stored value untouched. */
-  deliveryPolygon?: LatLng[] | null;
-  /** Excluded zones inside the main area. */
+  deliveryAreas?: AreaInput[] | null;
+  /** Excluded zones that must each sit inside at least one delivery area. */
   excludedPolygons?: LatLng[][] | null;
 }
 
 /**
- * Validate and normalize the polygon payload, returning the Prisma `data`
+ * Validate and normalize the coverage payload, returning the Prisma `data`
  * fields to write. Throws on malformed geometry so the controller can turn
- * it into a 400. Excluded rings must sit inside the main polygon.
+ * it into a 400. Excluded rings must sit inside at least one delivery area.
  */
 function buildPolygonData(input: UpsertBranchInput): {
-  deliveryPolygon?: Prisma.InputJsonValue | typeof Prisma.JsonNull;
+  deliveryAreas?: Prisma.InputJsonValue | typeof Prisma.JsonNull;
   excludedPolygons?: Prisma.InputJsonValue | typeof Prisma.JsonNull;
 } {
   const data: {
-    deliveryPolygon?: Prisma.InputJsonValue | typeof Prisma.JsonNull;
+    deliveryAreas?: Prisma.InputJsonValue | typeof Prisma.JsonNull;
     excludedPolygons?: Prisma.InputJsonValue | typeof Prisma.JsonNull;
   } = {};
 
-  // Main polygon: undefined = leave as-is; null/empty = clear; array = set.
-  let mainPolygon: Polygon | null = null;
-  if (input.deliveryPolygon !== undefined) {
-    if (input.deliveryPolygon === null || input.deliveryPolygon.length === 0) {
-      data.deliveryPolygon = Prisma.JsonNull;
+  // Delivery areas: undefined = leave as-is; null/empty = clear; array = set.
+  const areaPolygons: Polygon[] = [];
+  if (input.deliveryAreas !== undefined) {
+    if (input.deliveryAreas === null || input.deliveryAreas.length === 0) {
+      data.deliveryAreas = Prisma.JsonNull;
     } else {
-      const normalized = normalizePolygon(input.deliveryPolygon);
-      if (!normalized) {
-        throw new Error('Delivery area must be a polygon with at least 3 points.');
+      const normalized: NamedArea[] = [];
+      for (const [i, area] of input.deliveryAreas.entries()) {
+        const polygon = normalizePolygon(area?.polygon);
+        if (!polygon) {
+          throw new Error(`Delivery area ${i + 1} must be a polygon with at least 3 points.`);
+        }
+        const name = (area?.name ?? '').trim();
+        const nameAr = (area?.nameAr ?? '').trim();
+        if (!name && !nameAr) {
+          throw new Error(`Delivery area ${i + 1} needs a name.`);
+        }
+        normalized.push({ name, nameAr, polygon });
+        areaPolygons.push(polygon);
       }
-      mainPolygon = normalized;
-      data.deliveryPolygon = normalized as unknown as Prisma.InputJsonValue;
+      data.deliveryAreas = normalized as unknown as Prisma.InputJsonValue;
     }
   }
 
-  // Excluded polygons: each must be a valid ring inside the main polygon.
+  // Excluded polygons: each must be a valid ring inside at least one area.
   if (input.excludedPolygons !== undefined) {
     if (input.excludedPolygons === null || input.excludedPolygons.length === 0) {
       data.excludedPolygons = Prisma.JsonNull;
@@ -518,8 +577,13 @@ function buildPolygonData(input: UpsertBranchInput): {
         if (!ring) {
           throw new Error(`Excluded area ${i + 1} must be a polygon with at least 3 points.`);
         }
-        if (mainPolygon && !isPolygonInsidePolygon(ring, mainPolygon)) {
-          throw new Error(`Excluded area ${i + 1} must be fully inside the delivery area.`);
+        // Only enforce containment when areas were supplied in this same
+        // request (otherwise we'd need to read the stored areas to check).
+        if (
+          areaPolygons.length > 0 &&
+          !areaPolygons.some((poly) => isPolygonInsidePolygon(ring, poly))
+        ) {
+          throw new Error(`Excluded area ${i + 1} must be fully inside a delivery area.`);
         }
         rings.push(ring);
       }

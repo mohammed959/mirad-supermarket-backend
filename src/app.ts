@@ -3,7 +3,9 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
+import swaggerUi from 'swagger-ui-express';
 
+import { openapiSpec } from './docs/openapi';
 import { errorMiddleware } from './middleware/error.middleware';
 
 import authRoutes from './modules/auth/auth.routes';
@@ -28,6 +30,20 @@ import settingsRoutes from './modules/settings/settings.routes';
 import uploadRoutes from './modules/uploads/upload.routes';
 
 const app = express();
+
+// API documentation — registered before helmet so its default CSP doesn't
+// block Swagger UI's inline assets. Raw spec at /api-docs.json, UI at /api-docs.
+app.get('/api-docs.json', (_req, res) => {
+  res.json(openapiSpec);
+});
+app.use(
+  '/api-docs',
+  swaggerUi.serve,
+  swaggerUi.setup(openapiSpec, {
+    customSiteTitle: 'Alhathlul Supermarket API',
+    swaggerOptions: { persistAuthorization: true },
+  })
+);
 
 // Security
 app.use(helmet());

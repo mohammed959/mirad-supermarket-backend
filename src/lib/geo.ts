@@ -61,6 +61,48 @@ export function normalizePolygons(value: unknown): Polygon[] {
 }
 
 /**
+ * A named coverage/service area: a labelled polygon. Each city the store
+ * serves is one of these. `name`/`nameAr` are shown to customers (e.g. as the
+ * matched city) and to the admin managing coverage.
+ */
+export interface NamedArea {
+  name: string;
+  nameAr: string;
+  polygon: Polygon;
+}
+
+/**
+ * Coerce loosely-typed JSON (a Prisma `Json` column) into an array of named
+ * areas, dropping any entry whose polygon isn't a valid ring. Missing labels
+ * fall back to empty strings so the geometry check still works.
+ */
+export function normalizeAreas(value: unknown): NamedArea[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry): NamedArea | null => {
+      if (entry == null || typeof entry !== 'object') return null;
+      const rec = entry as Record<string, unknown>;
+      const polygon = normalizePolygon(rec.polygon);
+      if (!polygon) return null;
+      return {
+        name: typeof rec.name === 'string' ? rec.name : '',
+        nameAr: typeof rec.nameAr === 'string' ? rec.nameAr : '',
+        polygon,
+      };
+    })
+    .filter((a): a is NamedArea => a != null);
+}
+
+/**
+ * First area whose polygon contains `point`, or null when the point is
+ * outside every area. Used by both the coverage gate and the delivery quote
+ * to answer "is this location serviceable, and if so which city is it in?".
+ */
+export function findContainingArea(point: LatLng, areas: NamedArea[]): NamedArea | null {
+  return areas.find((a) => pointInPolygon(point, a.polygon)) ?? null;
+}
+
+/**
  * Ray-casting point-in-polygon test. Returns true when `point` is strictly
  * inside `polygon` (boundary cases are not guaranteed and don't matter for
  * coverage decisions — a customer exactly on the line is vanishingly rare).

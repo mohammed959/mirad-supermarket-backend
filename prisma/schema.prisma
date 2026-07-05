@@ -190,12 +190,17 @@ model Branch {
   phone     String?
   isActive  Boolean  @default(true)
 
-  // Polygon-based delivery coverage. `deliveryPolygon` is the main service
-  // area as an array of {lat,lng} vertices; `excludedPolygons` is an array
-  // of such rings carved out of it (sea, restricted/unreachable zones).
-  // When `deliveryPolygon` is null/empty, home delivery is unavailable —
-  // this replaces the old radius (maxDeliveryKm) coverage model.
-  deliveryPolygon  Json?
+  // Polygon-based delivery + marketplace-access coverage. `deliveryAreas` is
+  // an array of NAMED service areas — each entry is
+  // `{ name, nameAr, polygon: [{lat,lng}, …] }`. A customer location is
+  // serviceable (and allowed into the marketplace) when it falls inside ANY
+  // area's polygon and NOT inside an `excludedPolygons` ring (sea, restricted
+  // or unreachable zones carved out of the areas). When `deliveryAreas` is
+  // null/empty, coverage is unconfigured and home delivery is unavailable.
+  // This replaces the old single `deliveryPolygon` / radius model and lets the
+  // admin cover several cities (e.g. Riyadh Al Khabra, Bukayriyah, Al Khabra)
+  // with one polygon each.
+  deliveryAreas    Json?
   excludedPolygons Json?
 
   createdAt DateTime @default(now())

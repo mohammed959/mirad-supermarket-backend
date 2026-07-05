@@ -9,6 +9,7 @@ const router = Router();
 // Customer-facing (optionally authenticated for subscription benefits)
 router.post('/calculate-fee', optionalAuthenticate, asyncHandler(ctrl.calculateFee));
 router.post('/quote',         optionalAuthenticate, asyncHandler(ctrl.quote));
+router.post('/check-coverage', asyncHandler(ctrl.checkCoverage));
 router.get('/branch',         asyncHandler(ctrl.getBranch));
 router.get('/minimum-order',  asyncHandler(ctrl.getMinimumOrder));
 
