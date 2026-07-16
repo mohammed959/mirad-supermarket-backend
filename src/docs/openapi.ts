@@ -48,6 +48,19 @@ const devUrl =
 const prodUrl =
   process.env.SWAGGER_SERVER_URL_PROD || 'https://api.mirad-market.com/api';
 
+// Swagger UI defaults to the FIRST server in the array, so hosting the
+// spec on prod with `[dev, prod]` would send "Try it out" requests to
+// localhost. In production expose ONLY the production URL; in every
+// other environment expose localhost first (default) with production
+// still selectable from the dropdown.
+const servers =
+  process.env.NODE_ENV === 'production'
+    ? [{ url: prodUrl, description: 'Production' }]
+    : [
+        { url: devUrl, description: 'Local development' },
+        { url: prodUrl, description: 'Production' },
+      ];
+
 const tags = [
   { name: 'Authentication', description: 'OTP + staff email/password login. All tokens are HS256 JWTs, 7-day lifetime.' },
   { name: 'Profile', description: 'The current authenticated user.' },
@@ -103,10 +116,7 @@ export const openapiSpec = {
     },
     license: { name: 'Proprietary' },
   },
-  servers: [
-    { url: devUrl, description: 'Local development' },
-    { url: prodUrl, description: 'Production' },
-  ],
+  servers,
   tags,
   components: {
     securitySchemes: {
