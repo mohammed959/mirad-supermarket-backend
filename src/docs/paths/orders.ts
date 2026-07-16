@@ -129,13 +129,48 @@ export const orderPaths = {
     get: {
       tags: ['Orders'],
       summary: 'Buy-again product strip for the customer home screen',
-      description: 'Distinct products ordered by the current customer, most-recent first.',
+      description: [
+        'Returns the distinct products this customer has purchased before, wrapped with each product\'s `orderCount`.',
+        '',
+        'Ordering: `orderCount` DESC, then most-recent purchase DESC. Products that are no longer active or currently out of stock are excluded. Capped at 20 entries.',
+        '',
+        'Requires a **customer** JWT (staff tokens are rejected by the `authenticateCustomer` middleware).',
+      ].join('\n'),
       security: bearerAuth,
       responses: {
-        '200': success({
-          type: 'array',
-          items: { $ref: '#/components/schemas/Product' },
-        }),
+        '200': success(
+          {
+            type: 'array',
+            items: { $ref: '#/components/schemas/BuyAgainEntry' },
+          },
+          'Success',
+          {
+            success: true,
+            message: 'Success',
+            data: [
+              {
+                product: {
+                  id: 'clw7prod1',
+                  name: 'Almarai Full Cream Milk 1L',
+                  nameAr: 'حليب المراعي كامل الدسم ١ لتر',
+                  sku: 'ALM-MLK-1L',
+                  price: 6.5,
+                  stock: 120,
+                  reserved: 4,
+                  isActive: true,
+                  isFeatured: false,
+                  hideFromHome: false,
+                  imageUrl: 'https://mirad-market.b-cdn.net/products/ALM-MLK-1L.png',
+                  category: { id: 'clw7cat1', name: 'Dairy & Eggs', nameAr: 'الألبان والبيض' },
+                  subcategory: null,
+                  brand: null,
+                },
+                orderCount: 8,
+              },
+            ],
+          },
+        ),
+        '401': errorResponses['401'],
       },
     },
   },

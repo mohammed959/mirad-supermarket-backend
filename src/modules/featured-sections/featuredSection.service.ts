@@ -1,4 +1,101 @@
 import { prisma } from '../../lib/prisma';
+import {
+  toProductCard,
+  type ProductRow,
+} from '../storefront/productCard.mapper';
+import {
+  isProductAvailableConsideringVariants,
+  type ProductWithVariants,
+} from '../products/productAvailability';
+import type {
+  HomeFeaturedSection,
+  ProductCard,
+} from '../storefront/storefront.types';
+
+/**
+ * Storefront-home optimised featured-section read.
+ *
+ * Preserves the current `listSections(true)` availability contract
+ * exactly (Approach B — see Step 2 hardening report):
+ *
+ *   - Item inclusion filter: `isProductAvailableConsideringVariants` —
+ *     product-level unreserved stock OR at least one active variant with
+ *     unreserved stock. This mirrors today's legacy variant fallback.
+ *   - Card `available` field: same OR rule (so a card that made it into
+ *     a section is never shown as unavailable).
+ *   - Sections with zero eligible items are still hidden.
+ *   - Ordering matches: sections `[{ sortOrder: 'asc' }, { createdAt: 'desc' }]`,
+ *     items `{ sortOrder: 'asc' }`.
+ *
+ * Query shape:
+ *   - No `category` / `subcategory` / `brand` include.
+ *   - `variants` are selected with a minimal `{ isActive, stock, reserved }`
+ *     shape ONLY for the availability computation; they never appear in
+ *     the DTO because `toProductCard` whitelists its output fields.
+ *   - A cheap SQL pre-filter (`product.isActive && product.stock > 0`)
+ *     narrows the row set before the JS-side OR rule kicks in. Products
+ *     with `stock === 0` still pass the pre-filter and go through the
+ *     variant check.
+ */
+export async function listSectionsForHome(): Promise<HomeFeaturedSection[]> {
+  const sections = await prisma.featuredSection.findMany({
+    where: { isActive: true },
+    orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }],
+    select: {
+      id: true,
+      name: true,
+      nameAr: true,
+      sortOrder: true,
+      items: {
+        where: {
+          product: { isActive: true },
+        },
+        orderBy: { sortOrder: 'asc' },
+        select: {
+          product: {
+            select: {
+              id: true,
+              name: true,
+              nameAr: true,
+              sku: true,
+              price: true,
+              stock: true,
+              reserved: true,
+              isActive: true,
+              // Minimal variant slice for the OR availability rule.
+              // Variants NEVER appear in the DTO — `toProductCard`
+              // whitelists its output.
+              variants: {
+                where: { isActive: true },
+                select: { isActive: true, stock: true, reserved: true },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  const dto: HomeFeaturedSection[] = [];
+  for (const section of sections) {
+    const products: ProductCard[] = [];
+    for (const item of section.items) {
+      const raw = item.product as unknown as ProductWithVariants & ProductRow;
+      const available = isProductAvailableConsideringVariants(raw);
+      if (!available) continue;
+      products.push(toProductCard(raw, available));
+    }
+    if (products.length === 0) continue;
+    dto.push({
+      id: section.id,
+      name: section.name,
+      nameAr: section.nameAr,
+      sortOrder: section.sortOrder,
+      products,
+    });
+  }
+  return dto;
+}
 
 export async function listSections(activeOnly = true) {
   const sections = await prisma.featuredSection.findMany({

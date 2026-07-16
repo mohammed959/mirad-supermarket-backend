@@ -6,6 +6,12 @@ import {
   CreateProductInput,
   UpdateProductInput,
 } from './product.schema';
+import { isProductAvailable, type ProductWithStock } from './productAvailability';
+import {
+  toProductCard,
+  type ProductRow,
+} from '../storefront/productCard.mapper';
+import type { ProductCard } from '../storefront/storefront.types';
 
 /**
  * Standard paginated payload. Returns the new ninja-style fields
@@ -226,17 +232,100 @@ export async function getFeaturedProducts() {
   return products.map(annotateAvailability);
 }
 
+/**
+ * Storefront-home optimised all-products read.
+ *
+ * Matches today's `listProducts({ excludeHiddenFromHome: true })` filters
+ * (`isActive`, `stock > 0`, `hideFromHome: false`) and its `createdAt desc`
+ * ordering. Runs `findMany + count` in parallel so the aggregator can
+ * compute `hasMore = total > items.length`.
+ *
+ * Uses a narrow `select` — no relations, no description, no audit fields.
+ * Rows are mapped through the Step 1 `toProductCard`; availability comes
+ * from the shared `isProductAvailable` predicate.
+ */
+export interface HomeProductCardsOptions {
+  page?: number;
+  limit?: number;
+  excludeHiddenFromHome?: boolean;
+}
+
+export async function listProductCardsForHome(
+  opts: HomeProductCardsOptions = {},
+): Promise<{ items: ProductCard[]; total: number }> {
+  const { page = 1, limit = 20, excludeHiddenFromHome = false } = opts;
+
+  const where: Prisma.ProductWhereInput = {
+    isActive: true,
+    stock: { gt: 0 },
+    ...(excludeHiddenFromHome && { hideFromHome: false }),
+  };
+
+  const [rows, total] = await Promise.all([
+    prisma.product.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        nameAr: true,
+        sku: true,
+        price: true,
+        stock: true,
+        reserved: true,
+        isActive: true,
+      },
+      skip: (page - 1) * limit,
+      take: limit,
+      orderBy: { createdAt: 'desc' as const },
+    }),
+    prisma.product.count({ where }),
+  ]);
+
+  return {
+    items: (rows as unknown as ProductRow[]).map((row) => toProductCard(row)),
+    total,
+  };
+}
+
+/**
+ * Storefront-home optimised featured-products read.
+ *
+ * Preserves today's `getFeaturedProducts()` behavior exactly:
+ *   - filters: `isActive`, `isFeatured`, `stock > 0`
+ *   - ordering: none (Prisma default — matches today verbatim)
+ *   - cap: `take: 20`
+ *
+ * Returns a plain array — the home does not paginate the featured strip
+ * and never renders `hasMore`, so no `count` query is issued.
+ */
+export async function listFeaturedProductCardsForHome(
+  limit = 20,
+): Promise<ProductCard[]> {
+  const rows = await prisma.product.findMany({
+    where: {
+      isActive: true,
+      isFeatured: true,
+      stock: { gt: 0 },
+    },
+    select: {
+      id: true,
+      name: true,
+      nameAr: true,
+      sku: true,
+      price: true,
+      stock: true,
+      reserved: true,
+      isActive: true,
+    },
+    take: limit,
+  });
+  return (rows as unknown as ProductRow[]).map((row) => toProductCard(row));
+}
+
 // ─── Smart search ──────────────────────────────────────────────────
 
-type ProductWithStock = {
-  stock: number;
-  reserved: number;
-  isActive: boolean;
-};
-
 const annotateAvailability = <P extends ProductWithStock>(product: P): P & { available: boolean } => {
-  const available = product.isActive && product.stock - product.reserved > 0;
-  return { ...product, available };
+  return { ...product, available: isProductAvailable(product) };
 };
 
 export async function searchProducts(opts: {

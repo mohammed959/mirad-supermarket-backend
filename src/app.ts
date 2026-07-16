@@ -28,6 +28,7 @@ import checkoutRoutes from './modules/checkout/checkout.routes';
 import pickupRoutes from './modules/pickup/pickup.routes';
 import settingsRoutes from './modules/settings/settings.routes';
 import uploadRoutes from './modules/uploads/upload.routes';
+import storefrontRoutes from './modules/storefront/storefront.routes';
 
 const app = express();
 
@@ -90,6 +91,7 @@ app.use('/api/checkout', checkoutRoutes);
 app.use('/api/pickup', pickupRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/uploads', uploadRoutes);
+app.use('/api/storefront', storefrontRoutes);
 
 // 404 handler
 app.use((_req, res) => {

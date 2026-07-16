@@ -38,6 +38,7 @@ import { auditPaths } from './paths/audit';
 import { inventoryPaths } from './paths/inventory';
 import { settingsPaths } from './paths/settings';
 import { uploadPaths } from './paths/uploads';
+import { storefrontPaths } from './paths/storefront';
 
 // Server URLs already include the `/api` mount prefix, so every documented
 // path key is relative to `/api` (e.g. `/auth/request-otp`). Override via env
@@ -72,6 +73,7 @@ const tags = [
   { name: 'Pickup', description: 'Pickup-from-branch settings and time-slot capacity.' },
   { name: 'Featured Sections', description: 'Curated home-page product carousels.' },
   { name: 'Banners', description: 'Storefront banners.' },
+  { name: 'Storefront', description: 'Aggregated public reads that power the marketplace homepage in a single call.' },
   { name: 'Settings', description: 'Admin-managed pricing, home + coverage settings.' },
   { name: 'Uploads', description: 'Customer image uploads (delivery-location photos) to the CDN.' },
   { name: 'Users (Admin)', description: 'Admin CRUD for staff and customer accounts.' },
@@ -139,6 +141,7 @@ export const openapiSpec = {
     ...inventoryPaths,
     ...settingsPaths,
     ...uploadPaths,
+    ...storefrontPaths,
   },
 };
 

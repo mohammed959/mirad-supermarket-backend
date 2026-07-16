@@ -355,6 +355,22 @@ export const schemas = {
       updatedAt: { type: 'string', format: 'date-time' },
     },
   },
+  BuyAgainEntry: {
+    type: 'object',
+    description:
+      'One row in the customer buy-again list. Wraps the full `Product` shape with an `orderCount` derived from that customer\'s historical `OrderItem` rows (flat product usage merged with legacy variant usage).',
+    required: ['product', 'orderCount'],
+    properties: {
+      product: { $ref: '#/components/schemas/Product' },
+      orderCount: {
+        type: 'integer',
+        minimum: 1,
+        example: 8,
+        description:
+          'Number of times this product was purchased by the current customer across their order history.',
+      },
+    },
+  },
   CreateProductRequest: {
     type: 'object',
     required: ['categoryId', 'brandId', 'name', 'nameAr', 'sku', 'price', 'quantity'],
@@ -1037,6 +1053,157 @@ export const schemas = {
       changes: { type: 'object', additionalProperties: true, nullable: true },
       ipAddress: { type: 'string', nullable: true },
       createdAt: { type: 'string', format: 'date-time' },
+    },
+  },
+
+  // ── Storefront home aggregation (GET /api/storefront/home) ─────────
+  //
+  // These schemas describe the slim, home-only wire format produced by
+  // the aggregation endpoint. They deliberately do NOT reuse the fat
+  // legacy `Product` / `Category` / `Banner` schemas above — the home
+  // payload omits `category`, `subcategory`, `brand`, `variants`,
+  // `description`, `stock`, `reserved`, `isActive`, audit fields, and
+  // `subcategories`. Each schema below mirrors an interface in
+  // `modules/storefront/storefront.types.ts` exactly.
+  StorefrontProductCard: {
+    type: 'object',
+    required: ['id', 'name', 'nameAr', 'sku', 'imageUrl', 'price', 'available'],
+    properties: {
+      id: { type: 'string', example: 'clw7prod1' },
+      name: { type: 'string', example: 'Almarai Full Cream Milk 1L' },
+      nameAr: { type: 'string', example: 'حليب المراعي كامل الدسم 1 لتر' },
+      sku: { type: 'string', nullable: true, example: 'ALM-MLK-1L' },
+      imageUrl: {
+        type: 'string',
+        description:
+          'Product image URL derived server-side from `sku` via the CDN convention `${BUNNY_CDN_BASE_URL}/{sku}.{ext}`. Blank/null SKUs fall back to the configured default product image; the frontend swaps to the default on `<img onError>`.',
+        example: 'https://cdn.example.net/products/ALM-MLK-1L.png',
+      },
+      price: {
+        type: 'string',
+        nullable: true,
+        description:
+          'Decimal string matching the wire format produced when Prisma Decimal is serialized via Express (e.g. `"6.5"`, `"12.75"`). `null` for legacy products whose `price` column is unset.',
+        example: '6.5',
+      },
+      available: {
+        type: 'boolean',
+        description:
+          '`product.isActive && (product.stock - product.reserved) > 0`. For featured-section cards this may also be `true` when a legacy variant with unreserved stock exists — matches the current section-inclusion rule.',
+        example: true,
+      },
+    },
+  },
+
+  StorefrontHomeCategoryCard: {
+    type: 'object',
+    required: ['id', 'name', 'nameAr', 'slug', 'imageUrl', 'sortOrder'],
+    properties: {
+      id: { type: 'string', example: 'clw7cat1' },
+      name: { type: 'string', example: 'Dairy & Eggs' },
+      nameAr: { type: 'string', example: 'الألبان والبيض' },
+      slug: { type: 'string', example: 'dairy-eggs' },
+      imageUrl: {
+        type: 'string',
+        description:
+          'Category image URL derived server-side from `slug` via the CDN convention `${BUNNY_CATEGORY_BASE_URL}/{slug}.{ext}`. Blank/null slugs fall back to the default category image.',
+        example: 'https://cdn.example.net/category/dairy-eggs.png',
+      },
+      sortOrder: { type: 'integer', example: 1 },
+    },
+    description:
+      'Slim homepage category card. Deliberately excludes `subcategories`, `isActive`, `createdAt`, `updatedAt` — the home strip never renders them.',
+  },
+
+  StorefrontHomeBanner: {
+    type: 'object',
+    required: ['id', 'title', 'titleAr', 'imageUrl', 'linkType', 'linkValue', 'sortOrder'],
+    properties: {
+      id: { type: 'string', example: 'clw7ban1' },
+      title: { type: 'string', example: 'Weekend Sale' },
+      titleAr: { type: 'string', example: 'تخفيضات نهاية الأسبوع' },
+      imageUrl: {
+        type: 'string',
+        description:
+          'Admin-supplied absolute banner URL. Unlike products and categories, banner URLs are stored verbatim and are not derived from a slug.',
+        example: 'https://cdn.example.net/banners/weekend.png',
+      },
+      linkType: {
+        type: 'string',
+        nullable: true,
+        example: 'category',
+      },
+      linkValue: {
+        type: 'string',
+        nullable: true,
+        example: 'clw7cat1',
+      },
+      sortOrder: { type: 'integer', example: 1 },
+    },
+  },
+
+  StorefrontFeaturedSection: {
+    type: 'object',
+    required: ['id', 'name', 'nameAr', 'sortOrder', 'products'],
+    properties: {
+      id: { type: 'string', example: 'clw7sec1' },
+      name: { type: 'string', example: 'New Arrivals' },
+      nameAr: { type: 'string', example: 'وصل حديثاً' },
+      sortOrder: { type: 'integer', example: 1 },
+      products: {
+        type: 'array',
+        description:
+          'Products in this section, ordered by their item `sortOrder`. Filtered server-side to only include available products; sections with zero eligible items are not returned.',
+        items: { $ref: '#/components/schemas/StorefrontProductCard' },
+      },
+    },
+  },
+
+  StorefrontHomeAllProducts: {
+    type: 'object',
+    required: ['items', 'hasMore'],
+    properties: {
+      items: {
+        type: 'array',
+        description:
+          'First page of all-products cards. Size is capped by the admin-configured `HomeSettings.allProductsLimit` (default 20, max 100).',
+        items: { $ref: '#/components/schemas/StorefrontProductCard' },
+      },
+      hasMore: {
+        type: 'boolean',
+        description: '`true` when the server has more all-products rows than the response includes.',
+        example: false,
+      },
+    },
+  },
+
+  StorefrontHomeAggregate: {
+    type: 'object',
+    required: [
+      'categories',
+      'banners',
+      'featuredProducts',
+      'featuredSections',
+      'allProducts',
+    ],
+    properties: {
+      categories: {
+        type: 'array',
+        items: { $ref: '#/components/schemas/StorefrontHomeCategoryCard' },
+      },
+      banners: {
+        type: 'array',
+        items: { $ref: '#/components/schemas/StorefrontHomeBanner' },
+      },
+      featuredProducts: {
+        type: 'array',
+        items: { $ref: '#/components/schemas/StorefrontProductCard' },
+      },
+      featuredSections: {
+        type: 'array',
+        items: { $ref: '#/components/schemas/StorefrontFeaturedSection' },
+      },
+      allProducts: { $ref: '#/components/schemas/StorefrontHomeAllProducts' },
     },
   },
 };
