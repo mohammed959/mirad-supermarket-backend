@@ -98,11 +98,27 @@ function decorate(payload: unknown, parentKey?: string): unknown {
 
   const obj = payload as Record<string, unknown>;
 
+  // A subcategory row is any object with a `categoryId` string — parent-key
+  // dispatch (`subcategory`) may be absent when the row is a top-level list
+  // item. When present, prefer an admin-supplied stored URL; fall back to
+  // slug-derived. Categories keep the current slug-always behavior.
+  const isSubcategoryRow =
+    parentKey === 'subcategory' ||
+    (typeof obj.slug === 'string' &&
+      typeof obj.name === 'string' &&
+      typeof obj.categoryId === 'string');
+  const storedImageUrl =
+    typeof obj.imageUrl === 'string' && obj.imageUrl.trim().length > 0
+      ? obj.imageUrl
+      : null;
+
   // Parent-key dispatch — disambiguates brand from category/subcategory
   // when a `select` strips the structural cues.
   if (parentKey === 'brand' && typeof obj.slug === 'string') {
     obj.imageUrl = getBrandImageUrl(obj.slug);
-  } else if ((parentKey === 'category' || parentKey === 'subcategory') && typeof obj.slug === 'string') {
+  } else if (isSubcategoryRow && typeof obj.slug === 'string') {
+    obj.imageUrl = storedImageUrl ?? getCategoryImageUrl(obj.slug);
+  } else if (parentKey === 'category' && typeof obj.slug === 'string') {
     obj.imageUrl = getCategoryImageUrl(obj.slug);
   } else if (looksLikeVariantRow(obj)) {
     const sku = obj.sku as string;

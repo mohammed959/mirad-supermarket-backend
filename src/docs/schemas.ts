@@ -1095,9 +1095,29 @@ export const schemas = {
     },
   },
 
-  StorefrontHomeCategoryCard: {
+  StorefrontHomeSubcategoryCard: {
     type: 'object',
     required: ['id', 'name', 'nameAr', 'slug', 'imageUrl', 'sortOrder'],
+    properties: {
+      id: { type: 'string', example: 'clw7sub1' },
+      name: { type: 'string', example: 'Milk' },
+      nameAr: { type: 'string', example: 'حليب' },
+      slug: { type: 'string', example: 'dairy-milk' },
+      imageUrl: {
+        type: 'string',
+        description:
+          'Admin-supplied stored URL when set; otherwise falls back to the slug-derived Bunny URL `${BUNNY_CATEGORY_BASE_URL}/{slug}.{ext}`, mirroring the category-image convention. Blank stored values fall back to the default image.',
+        example: 'https://apprafed.b-cdn.net/Subcategories/6f1e0a2c-9c3d-4d21-b0e4-2a91d0f9b3ac.webp',
+      },
+      sortOrder: { type: 'integer', example: 1 },
+    },
+    description:
+      'Slim homepage subcategory card. Included under `StorefrontHomeCategoryCard.subCategories`. Excludes `categoryId`, `isActive`, and audit fields — the home page never renders them.',
+  },
+
+  StorefrontHomeCategoryCard: {
+    type: 'object',
+    required: ['id', 'name', 'nameAr', 'slug', 'imageUrl', 'sortOrder', 'subCategories'],
     properties: {
       id: { type: 'string', example: 'clw7cat1' },
       name: { type: 'string', example: 'Dairy & Eggs' },
@@ -1110,9 +1130,15 @@ export const schemas = {
         example: 'https://cdn.example.net/category/dairy-eggs.png',
       },
       sortOrder: { type: 'integer', example: 1 },
+      subCategories: {
+        type: 'array',
+        description:
+          'Active subcategories under this category, sorted by `sortOrder asc`. Empty array when none exist.',
+        items: { $ref: '#/components/schemas/StorefrontHomeSubcategoryCard' },
+      },
     },
     description:
-      'Slim homepage category card. Deliberately excludes `subcategories`, `isActive`, `createdAt`, `updatedAt` — the home strip never renders them.',
+      'Slim homepage category card. Excludes `isActive`, `createdAt`, `updatedAt`. Carries only active subcategories via `subCategories`.',
   },
 
   StorefrontHomeBanner: {

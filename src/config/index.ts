@@ -64,6 +64,8 @@ export const config = {
     ),
     // Folder inside the Storage Zone for customer uploads (no slashes).
     customerFolder: (process.env.BUNNY_CUSTOMER_UPLOAD_FOLDER ?? 'Customers').replace(/^\/+|\/+$/g, ''),
+    // Folder inside the Storage Zone for admin-uploaded subcategory images.
+    subcategoryFolder: (process.env.BUNNY_SUBCATEGORY_UPLOAD_FOLDER ?? 'Subcategories').replace(/^\/+|\/+$/g, ''),
   },
   isDev: (process.env.NODE_ENV ?? 'development') === 'development',
 };

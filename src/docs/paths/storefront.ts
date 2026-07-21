@@ -12,6 +12,24 @@ const homeExample = {
         slug: 'dairy-eggs',
         imageUrl: 'https://cdn.example.net/category/dairy-eggs.png',
         sortOrder: 1,
+        subCategories: [
+          {
+            id: 'clw7sub1',
+            name: 'Milk',
+            nameAr: 'حليب',
+            slug: 'dairy-milk',
+            imageUrl: 'https://apprafed.b-cdn.net/Subcategories/6f1e0a2c-9c3d-4d21-b0e4-2a91d0f9b3ac.webp',
+            sortOrder: 1,
+          },
+          {
+            id: 'clw7sub2',
+            name: 'Cheese',
+            nameAr: 'جبن',
+            slug: 'dairy-cheese',
+            imageUrl: 'https://cdn.example.net/category/dairy-cheese.png',
+            sortOrder: 2,
+          },
+        ],
       },
     ],
     banners: [

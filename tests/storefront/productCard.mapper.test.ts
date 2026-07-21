@@ -26,10 +26,12 @@ import {
   toCategoryCard,
   toFeaturedSection,
   toProductCard,
+  toSubcategoryCard,
   type BannerRow,
   type CategoryRow,
   type FeaturedSectionRow,
   type ProductRow,
+  type SubcategoryRow,
 } from '../../src/modules/storefront/productCard.mapper';
 
 // ── Tiny in-file test harness ────────────────────────────────────────
@@ -242,14 +244,16 @@ test('toProductCard tolerates a frozen input row', () => {
 });
 
 // ── HomeCategoryCard ────────────────────────────────────────────────
-test('toCategoryCard returns only the six DTO fields, drops subcategories', () => {
+test('toCategoryCard returns the seven DTO fields and drops the lowercase back-relation', () => {
   const row = {
     ...categoryRow(),
     isActive: true,
     createdAt: new Date(),
     updatedAt: new Date(),
     imageUrl: 'https://legacy-value-should-be-ignored/x.png',
-    subcategories: [{ id: 'sub_1', name: 'Milk', nameAr: 'حليب' }],
+    subcategories: [
+      { id: 'sub_1', name: 'Milk', nameAr: 'حليب', slug: 'milk', imageUrl: null, sortOrder: 1 },
+    ],
   } as CategoryRow;
   const card = toCategoryCard(row);
   assert.deepEqual(Object.keys(card).sort(), [
@@ -259,8 +263,11 @@ test('toCategoryCard returns only the six DTO fields, drops subcategories', () =
     'nameAr',
     'slug',
     'sortOrder',
+    'subCategories',
   ]);
+  // The lowercase Prisma back-relation is not on the wire — only camelCase `subCategories` is.
   assert.equal((card as unknown as Record<string, unknown>).subcategories, undefined);
+  assert.ok(Array.isArray(card.subCategories));
 });
 
 test('HomeCategoryCard.imageUrl derives from slug via getCategoryImageUrl', () => {
@@ -270,10 +277,82 @@ test('HomeCategoryCard.imageUrl derives from slug via getCategoryImageUrl', () =
   assert.ok(card.imageUrl.startsWith(config.bunny.categoryBaseUrl + '/'));
 });
 
+test('toCategoryCard returns subCategories: [] when the input has no subcategories', () => {
+  const card = toCategoryCard(categoryRow());
+  assert.deepEqual(card.subCategories, []);
+});
+
+test('toCategoryCard maps each subcategory through toSubcategoryCard', () => {
+  const row: CategoryRow = {
+    ...categoryRow(),
+    subcategories: [
+      { id: 'sub_1', name: 'Milk',  nameAr: 'حليب',  slug: 'milk',  imageUrl: null, sortOrder: 1 },
+      { id: 'sub_2', name: 'Cream', nameAr: 'كريمة', slug: 'cream', imageUrl: 'https://cdn.example.net/Subcategories/cream.webp', sortOrder: 2 },
+    ],
+  };
+  const card = toCategoryCard(row);
+  assert.equal(card.subCategories.length, 2);
+  assert.deepEqual(card.subCategories[0], toSubcategoryCard(row.subcategories![0]));
+  assert.deepEqual(card.subCategories[1], toSubcategoryCard(row.subcategories![1]));
+});
+
 test('toCategoryCard does not mutate its input row', () => {
-  const row = categoryRow();
+  const row: CategoryRow = {
+    ...categoryRow(),
+    subcategories: [
+      { id: 'sub_1', name: 'Milk', nameAr: 'حليب', slug: 'milk', imageUrl: null, sortOrder: 1 },
+    ],
+  };
   const snapshot = JSON.stringify(row);
   toCategoryCard(row);
+  assert.equal(JSON.stringify(row), snapshot);
+});
+
+// ── HomeSubcategoryCard ─────────────────────────────────────────────
+const subRow = (over: Partial<SubcategoryRow> = {}): SubcategoryRow => ({
+  id: 'sub_1',
+  name: 'Milk',
+  nameAr: 'حليب',
+  slug: 'milk',
+  imageUrl: null,
+  sortOrder: 1,
+  ...over,
+});
+
+test('toSubcategoryCard preserves a non-empty stored imageUrl verbatim', () => {
+  const stored = 'https://apprafed.b-cdn.net/Subcategories/6f1e.webp';
+  const card = toSubcategoryCard(subRow({ imageUrl: stored }));
+  assert.equal(card.imageUrl, stored);
+});
+
+test('toSubcategoryCard falls back to slug-derived URL when stored is null', () => {
+  const card = toSubcategoryCard(subRow({ imageUrl: null, slug: 'milk' }));
+  assert.equal(card.imageUrl, getCategoryImageUrl('milk'));
+});
+
+test('toSubcategoryCard falls back to slug-derived URL when stored is empty or whitespace', () => {
+  for (const empty of ['', '   ', '\t\n']) {
+    const card = toSubcategoryCard(subRow({ imageUrl: empty, slug: 'milk' }));
+    assert.equal(card.imageUrl, getCategoryImageUrl('milk'));
+  }
+});
+
+test('toSubcategoryCard returns exactly the six DTO fields', () => {
+  const card = toSubcategoryCard(subRow());
+  assert.deepEqual(Object.keys(card).sort(), [
+    'id',
+    'imageUrl',
+    'name',
+    'nameAr',
+    'slug',
+    'sortOrder',
+  ]);
+});
+
+test('toSubcategoryCard does not mutate its input row', () => {
+  const row = subRow({ imageUrl: 'https://x/y.png' });
+  const snapshot = JSON.stringify(row);
+  toSubcategoryCard(row);
   assert.equal(JSON.stringify(row), snapshot);
 });
 

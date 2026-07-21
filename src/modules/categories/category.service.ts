@@ -9,21 +9,22 @@ import type { HomeCategoryCard } from '../storefront/storefront.types';
  * Storefront-home optimised category read.
  *
  * Returns only categories that are active AND flagged to show on the home
- * strip. Skips the `subcategories` include entirely — the home row does
- * not render subcategories, and dropping the join keeps the payload +
- * query cost minimal.
+ * strip. Each category carries its `subCategories` filtered to `isActive`
+ * subs, ordered by `sortOrder asc`, mapped through the shared mapper — so
+ * inactive subcategories are dropped in-query (not post-filtered) and
+ * the payload arrives already sorted.
  *
- * The DB `imageUrl` column is intentionally NOT selected. It is dead-code
- * at the wire today: `lib/productImage.decorateProductImages` runs on
- * every `ok()` response and unconditionally overwrites any category
- * `imageUrl` with `getCategoryImageUrl(slug)` (both the `looksLikeCategory`
- * branch and the `parentKey === 'category'` branch). Selecting the column
- * would ship bytes the wire never uses. The Step 1 `toCategoryCard`
- * mapper derives `imageUrl` from `slug` the same way, so behavior is
- * byte-identical to every existing category-returning endpoint today.
+ * Query cost: a single `findMany` with a nested-relation `select`. Prisma
+ * resolves nested `select` on a relation without an extra round-trip per
+ * parent row — cost is bounded and independent of the number of parent
+ * categories, so there is no N+1. Callers add no further per-row reads.
  *
- * Ordering matches `getCategories(true, true)` (sortOrder asc). Mapped
- * through the Step 1 `toCategoryCard` so the DTO stays authoritative.
+ * The category-level `imageUrl` column is intentionally NOT selected. It
+ * is dead-code at the wire today: `lib/productImage.decorateProductImages`
+ * and `toCategoryCard` both derive it from `slug`. The subcategory-level
+ * `imageUrl` IS selected because the mapper preserves a non-empty stored
+ * URL and falls back to slug-derived only when it is null/empty — which
+ * matches the decorator's subcategory branch.
  */
 export async function getHomepageCategories(): Promise<HomeCategoryCard[]> {
   const rows = await prisma.category.findMany({
@@ -34,6 +35,18 @@ export async function getHomepageCategories(): Promise<HomeCategoryCard[]> {
       nameAr: true,
       slug: true,
       sortOrder: true,
+      subcategories: {
+        where: { isActive: true },
+        select: {
+          id: true,
+          name: true,
+          nameAr: true,
+          slug: true,
+          imageUrl: true,
+          sortOrder: true,
+        },
+        orderBy: { sortOrder: 'asc' },
+      },
     },
     orderBy: { sortOrder: 'asc' },
   });
@@ -96,7 +109,7 @@ export async function createSubcategory(data: {
   name: string;
   nameAr: string;
   slug: string;
-  imageUrl?: string;
+  imageUrl?: string | null;
   sortOrder?: number;
 }) {
   return prisma.subcategory.create({ data });
@@ -106,7 +119,7 @@ export async function updateSubcategory(id: string, data: Partial<{
   name: string;
   nameAr: string;
   slug: string;
-  imageUrl: string;
+  imageUrl: string | null;
   sortOrder: number;
   isActive: boolean;
 }>) {

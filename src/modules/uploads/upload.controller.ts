@@ -32,3 +32,30 @@ export async function uploadDeliveryImage(req: AuthRequest, res: Response): Prom
     badRequest(res, (err as Error).message || 'Upload failed');
   }
 }
+
+/**
+ * Upload a single subcategory image (admin/staff only) to Bunny Storage under
+ * `Subcategories/{uuid}.{ext}` and return its public CDN URL. The admin
+ * subcategory form stores the returned URL in `Subcategory.imageUrl`. The
+ * folder is env-configurable via BUNNY_SUBCATEGORY_UPLOAD_FOLDER.
+ */
+export async function uploadSubcategoryImage(req: AuthRequest, res: Response): Promise<void> {
+  const file = (req as { file?: { buffer: Buffer; mimetype: string } }).file;
+  if (!file) {
+    badRequest(res, 'No image uploaded (field name: file).');
+    return;
+  }
+  if (!isSupportedImageMime(file.mimetype)) {
+    badRequest(res, 'Only JPG, PNG or WEBP images are allowed.');
+    return;
+  }
+
+  const path = `${config.bunny.subcategoryFolder}/${randomUUID()}.${extForMime(file.mimetype)}`;
+
+  try {
+    const url = await uploadBuffer(path, file.buffer, file.mimetype);
+    ok(res, { url }, 'Image uploaded');
+  } catch (err) {
+    badRequest(res, (err as Error).message || 'Upload failed');
+  }
+}

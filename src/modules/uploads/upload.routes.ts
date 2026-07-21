@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { asyncHandler } from '../../middleware/asyncHandler';
-import { authenticateCustomer } from '../../middleware/auth.middleware';
+import { authenticateCustomer, authenticateStaff } from '../../middleware/auth.middleware';
 import * as ctrl from './upload.controller';
 
 const router = Router();
@@ -16,6 +16,14 @@ router.post(
   authenticateCustomer,
   upload.single('file'),
   asyncHandler(ctrl.uploadDeliveryImage),
+);
+
+// Staff uploads a subcategory image → returns { url }.
+router.post(
+  '/subcategory-image',
+  authenticateStaff,
+  upload.single('file'),
+  asyncHandler(ctrl.uploadSubcategoryImage),
 );
 
 export default router;

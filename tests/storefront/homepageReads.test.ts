@@ -67,7 +67,7 @@ const productRow = (over: Record<string, unknown> = {}) => ({
 });
 
 // ── Categories ────────────────────────────────────────────────────────
-test('getHomepageCategories: applies isActive + showOnHome filters and no subcategories include', async () => {
+test('getHomepageCategories: applies isActive + showOnHome filters and nests active subcategories via select', async () => {
   const calls: Call[] = [];
   const restore = stub(calls, 'category', 'findMany', () => []);
   try {
@@ -81,7 +81,7 @@ test('getHomepageCategories: applies isActive + showOnHome filters and no subcat
     orderBy: Record<string, unknown>;
     include?: unknown;
   };
-  assert.equal(calls.length, 1);
+  assert.equal(calls.length, 1, 'single Prisma query — no N+1');
   assert.equal(args.where.isActive, true);
   assert.equal(args.where.showOnHome, true);
   assert.equal(args.include, undefined, 'must not use include');
@@ -91,26 +91,47 @@ test('getHomepageCategories: applies isActive + showOnHome filters and no subcat
     'nameAr',
     'slug',
     'sortOrder',
+    'subcategories',
   ]);
-  assert.equal(
-    (args.select as Record<string, unknown>).subcategories,
-    undefined,
-    'subcategories must not be selected',
-  );
-  // `imageUrl` intentionally NOT selected — decorated on every existing
-  // wire response today, so DB value would be discarded anyway.
+  // Category-level `imageUrl` intentionally NOT selected — slug-derived
+  // in the mapper, matching legacy category behavior.
   assert.equal(
     (args.select as Record<string, unknown>).imageUrl,
     undefined,
-    'imageUrl must not be selected (already dead-code at the wire)',
+    'category imageUrl must not be selected (still slug-derived)',
   );
   assert.deepEqual(args.orderBy, { sortOrder: 'asc' });
+
+  const subs = args.select.subcategories as {
+    where: Record<string, unknown>;
+    select: Record<string, unknown>;
+    orderBy: Record<string, unknown>;
+  };
+  assert.equal(subs.where.isActive, true, 'only active subcategories');
+  assert.deepEqual(Object.keys(subs.select).sort(), [
+    'id',
+    'imageUrl',
+    'name',
+    'nameAr',
+    'slug',
+    'sortOrder',
+  ]);
+  assert.deepEqual(subs.orderBy, { sortOrder: 'asc' });
 });
 
-test('getHomepageCategories: preserves DB ordering and derives imageUrl from slug', async () => {
+test('getHomepageCategories: preserves DB ordering and maps subcategories through toCategoryCard', async () => {
   const rows = [
-    { id: 'c1', name: 'Dairy', nameAr: 'ألبان', slug: 'dairy', sortOrder: 1 },
-    { id: 'c2', name: 'Snacks', nameAr: 'وجبات', slug: 'snacks', sortOrder: 2 },
+    {
+      id: 'c1', name: 'Dairy', nameAr: 'ألبان', slug: 'dairy', sortOrder: 1,
+      subcategories: [
+        { id: 'sub_1', name: 'Milk',  nameAr: 'حليب',  slug: 'milk',  imageUrl: null, sortOrder: 1 },
+        { id: 'sub_2', name: 'Cheese', nameAr: 'جبن',  slug: 'cheese', imageUrl: 'https://cdn.example.net/Subcategories/cheese.webp', sortOrder: 2 },
+      ],
+    },
+    {
+      id: 'c2', name: 'Snacks', nameAr: 'وجبات', slug: 'snacks', sortOrder: 2,
+      subcategories: [],
+    },
   ];
   const restore = stub([], 'category', 'findMany', () => rows);
   let result;
@@ -130,13 +151,28 @@ test('getHomepageCategories: preserves DB ordering and derives imageUrl from slu
       'nameAr',
       'slug',
       'sortOrder',
+      'subCategories',
     ]);
+    // Lowercase Prisma back-relation is not on the wire.
     assert.equal(
       (card as unknown as Record<string, unknown>).subcategories,
       undefined,
     );
+    assert.ok(Array.isArray(card.subCategories));
   }
   assert.equal(result[0].imageUrl, getCategoryImageUrl('dairy'));
+
+  // Subcategory contents + image resolution.
+  assert.equal(result[0].subCategories.length, 2);
+  assert.equal(result[0].subCategories[0].id, 'sub_1');
+  assert.equal(result[0].subCategories[0].imageUrl, getCategoryImageUrl('milk'));
+  assert.equal(
+    result[0].subCategories[1].imageUrl,
+    'https://cdn.example.net/Subcategories/cheese.webp',
+  );
+
+  // Empty case → `[]`, category still returned.
+  assert.deepEqual(result[1].subCategories, []);
 });
 
 // ── Product cards (all-products path) ────────────────────────────────

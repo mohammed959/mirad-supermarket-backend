@@ -18,6 +18,15 @@
  *     removes join work.
  */
 
+export interface HomeSubcategoryCard {
+  id: string;
+  name: string;
+  nameAr: string;
+  slug: string;
+  imageUrl: string;
+  sortOrder: number;
+}
+
 export interface HomeCategoryCard {
   id: string;
   name: string;
@@ -25,6 +34,8 @@ export interface HomeCategoryCard {
   slug: string;
   imageUrl: string;
   sortOrder: number;
+  /** Active subcategories under this category, sorted by sortOrder asc. `[]` when none. */
+  subCategories: HomeSubcategoryCard[];
 }
 
 export interface HomeBanner {

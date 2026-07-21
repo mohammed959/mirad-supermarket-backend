@@ -27,6 +27,7 @@ import type {
   HomeBanner,
   HomeCategoryCard,
   HomeFeaturedSection,
+  HomeSubcategoryCard,
   ProductCard,
 } from './storefront.types';
 
@@ -45,12 +46,23 @@ export interface ProductRow extends ProductWithStock {
   price: number | string | Stringifiable | null;
 }
 
+export interface SubcategoryRow {
+  id: string;
+  name: string;
+  nameAr: string;
+  slug: string;
+  imageUrl: string | null;
+  sortOrder: number;
+}
+
 export interface CategoryRow {
   id: string;
   name: string;
   nameAr: string;
   slug: string;
   sortOrder: number;
+  /** Optional so callers without the include still type-check. */
+  subcategories?: SubcategoryRow[];
 }
 
 export interface BannerRow {
@@ -116,7 +128,28 @@ export function toProductCard(row: ProductRow, available?: boolean): ProductCard
   };
 }
 
+/**
+ * Convert a Prisma subcategory row into a `HomeSubcategoryCard`.
+ *
+ * Image URL resolution: if the DB `imageUrl` is a non-empty string, it wins.
+ * Otherwise fall back to the slug-derived Bunny URL — matches the behavior
+ * of `decorate()` in `lib/productImage.ts` for subcategory rows and keeps
+ * the wire URL populated even for subcategories the admin has not curated.
+ */
+export function toSubcategoryCard(row: SubcategoryRow): HomeSubcategoryCard {
+  const stored = typeof row.imageUrl === 'string' ? row.imageUrl.trim() : '';
+  return {
+    id: row.id,
+    name: row.name,
+    nameAr: row.nameAr,
+    slug: row.slug,
+    imageUrl: stored.length > 0 ? stored : getCategoryImageUrl(row.slug),
+    sortOrder: row.sortOrder,
+  };
+}
+
 export function toCategoryCard(row: CategoryRow): HomeCategoryCard {
+  const subs = Array.isArray(row.subcategories) ? row.subcategories : [];
   return {
     id: row.id,
     name: row.name,
@@ -124,6 +157,7 @@ export function toCategoryCard(row: CategoryRow): HomeCategoryCard {
     slug: row.slug,
     imageUrl: getCategoryImageUrl(row.slug),
     sortOrder: row.sortOrder,
+    subCategories: subs.map(toSubcategoryCard),
   };
 }
 

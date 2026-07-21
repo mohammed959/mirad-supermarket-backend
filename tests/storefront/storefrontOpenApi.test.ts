@@ -218,15 +218,40 @@ test('storefront component schemas do not leak forbidden ProductCard fields', ()
   );
 });
 
-test('StorefrontHomeCategoryCard has no subcategories, no isActive, no audit fields', () => {
+test('StorefrontHomeCategoryCard exposes subCategories (camelCase) and drops isActive/audit fields', () => {
   const cat = ((openapiSpec.components as Record<string, unknown>).schemas as Record<
     string,
     { properties: Record<string, unknown> }
   >).StorefrontHomeCategoryCard;
   const keys = Object.keys(cat.properties).sort();
-  assert.deepEqual(keys, ['id', 'imageUrl', 'name', 'nameAr', 'slug', 'sortOrder']);
+  assert.deepEqual(keys, ['id', 'imageUrl', 'name', 'nameAr', 'slug', 'sortOrder', 'subCategories']);
+  // Lowercase Prisma back-relation is never exposed on the wire.
   for (const forbidden of ['subcategories', 'isActive', 'createdAt', 'updatedAt']) {
     assert.equal(cat.properties[forbidden], undefined);
+  }
+  // subCategories → array of $ref StorefrontHomeSubcategoryCard.
+  const subs = cat.properties.subCategories as {
+    type?: string;
+    items?: { $ref?: string };
+  };
+  assert.equal(subs.type, 'array');
+  assert.equal(subs.items?.$ref, '#/components/schemas/StorefrontHomeSubcategoryCard');
+});
+
+test('StorefrontHomeSubcategoryCard exposes exactly the six DTO fields, non-nullable, all required', () => {
+  const sub = ((openapiSpec.components as Record<string, unknown>).schemas as Record<
+    string,
+    { properties: Record<string, { nullable?: boolean }>; required?: string[] }
+  >).StorefrontHomeSubcategoryCard;
+  const keys = Object.keys(sub.properties).sort();
+  assert.deepEqual(keys, ['id', 'imageUrl', 'name', 'nameAr', 'slug', 'sortOrder']);
+  assert.deepEqual([...(sub.required ?? [])].sort(), ['id', 'imageUrl', 'name', 'nameAr', 'slug', 'sortOrder']);
+  for (const p of keys) {
+    assert.notEqual(sub.properties[p].nullable, true, `${p} must be non-nullable`);
+  }
+  // Must not leak Prisma-only fields.
+  for (const forbidden of ['categoryId', 'isActive', 'createdAt', 'updatedAt']) {
+    assert.equal(sub.properties[forbidden], undefined);
   }
 });
 
@@ -356,9 +381,16 @@ test('ProductCard.price: string | null wire representation is enforced', () => {
 
 test('StorefrontHomeCategoryCard: nullability + required match the DTO exactly', () => {
   assertRequiredEqualsAllKeys('StorefrontHomeCategoryCard');
-  // All six fields non-nullable in the DTO.
-  for (const p of ['id', 'name', 'nameAr', 'slug', 'imageUrl', 'sortOrder']) {
+  // All seven fields non-nullable in the DTO (subCategories is an array, never null).
+  for (const p of ['id', 'name', 'nameAr', 'slug', 'imageUrl', 'sortOrder', 'subCategories']) {
     assertPropNullable('StorefrontHomeCategoryCard', p, false);
+  }
+});
+
+test('StorefrontHomeSubcategoryCard: nullability + required match the DTO exactly', () => {
+  assertRequiredEqualsAllKeys('StorefrontHomeSubcategoryCard');
+  for (const p of ['id', 'name', 'nameAr', 'slug', 'imageUrl', 'sortOrder']) {
+    assertPropNullable('StorefrontHomeSubcategoryCard', p, false);
   }
 });
 
@@ -410,6 +442,13 @@ test('sanity: no storefront schema accidentally marks a DTO-non-nullable field a
     ['StorefrontHomeCategoryCard', 'slug'],
     ['StorefrontHomeCategoryCard', 'imageUrl'],
     ['StorefrontHomeCategoryCard', 'sortOrder'],
+    ['StorefrontHomeCategoryCard', 'subCategories'],
+    ['StorefrontHomeSubcategoryCard', 'id'],
+    ['StorefrontHomeSubcategoryCard', 'name'],
+    ['StorefrontHomeSubcategoryCard', 'nameAr'],
+    ['StorefrontHomeSubcategoryCard', 'slug'],
+    ['StorefrontHomeSubcategoryCard', 'imageUrl'],
+    ['StorefrontHomeSubcategoryCard', 'sortOrder'],
     ['StorefrontHomeBanner', 'id'],
     ['StorefrontHomeBanner', 'title'],
     ['StorefrontHomeBanner', 'titleAr'],
