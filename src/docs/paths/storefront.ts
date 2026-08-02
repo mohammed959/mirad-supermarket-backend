@@ -7,24 +7,21 @@ const homeExample = {
     categories: [
       {
         id: 'clw7cat1',
-        name: 'Dairy & Eggs',
-        nameAr: 'الألبان والبيض',
+        name: 'الألبان والبيض',
         slug: 'dairy-eggs',
         imageUrl: 'https://cdn.example.net/category/dairy-eggs.png',
         sortOrder: 1,
         subCategories: [
           {
             id: 'clw7sub1',
-            name: 'Milk',
-            nameAr: 'حليب',
+            name: 'حليب',
             slug: 'dairy-milk',
             imageUrl: 'https://apprafed.b-cdn.net/Subcategories/6f1e0a2c-9c3d-4d21-b0e4-2a91d0f9b3ac.webp',
             sortOrder: 1,
           },
           {
             id: 'clw7sub2',
-            name: 'Cheese',
-            nameAr: 'جبن',
+            name: 'جبن',
             slug: 'dairy-cheese',
             imageUrl: 'https://cdn.example.net/category/dairy-cheese.png',
             sortOrder: 2,
@@ -113,15 +110,17 @@ const homeSuccess = {
 
 export const storefrontPaths = {
   '/storefront/home': {
-    get: {
+    post: {
       tags: ['Storefront'],
       summary: 'Aggregated public data for the marketplace homepage',
       description: [
         'Returns every public strip the marketplace home page renders in a single response so the frontend can paint the page from one request.',
         '',
+        '**Method:** POST — the request body carries the language selector `{ lang }`.',
+        '',
         '**Included (public, identical for guests and authenticated customers):**',
         '',
-        '- `categories` — homepage-active category cards, ordered by `sortOrder`.',
+        '- `categories` — homepage-active category cards, ordered by `sortOrder`. `name` is localized per request-body `lang` (default `"ar"`). Each item carries its active subcategories under `subCategories` (also localized).',
         '- `banners` — active promotional banners, ordered by `sortOrder` then `createdAt`.',
         '- `featuredProducts` — up to 20 in-stock featured product cards.',
         '- `featuredSections` — curated sections and their in-stock product cards.',
@@ -135,8 +134,16 @@ export const storefrontPaths = {
         '- User profile',
         '- Delivery branch / coverage results',
         '',
-        'The response body is bilingual (each entity carries mirrored `name`/`nameAr` or `title`/`titleAr`), so there is no locale variant and no `Vary: Accept-Language` header.',
+        'Only category / subcategory names are localized today; product, section, and banner sections remain bilingual (each carries mirrored `name`/`nameAr` or `title`/`titleAr`).',
       ].join('\n'),
+      requestBody: {
+        required: false,
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/StorefrontHomeRequest' },
+          },
+        },
+      },
       responses: {
         '200': homeSuccess,
         '500': errorResponses['500'],

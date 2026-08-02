@@ -119,7 +119,7 @@ test('getHomepageCategories: applies isActive + showOnHome filters and nests act
   assert.deepEqual(subs.orderBy, { sortOrder: 'asc' });
 });
 
-test('getHomepageCategories: preserves DB ordering and maps subcategories through toCategoryCard', async () => {
+test('getHomepageCategories: preserves DB ordering, localizes name per lang (default ar), drops nameAr from wire', async () => {
   const rows = [
     {
       id: 'c1', name: 'Dairy', nameAr: 'ألبان', slug: 'dairy', sortOrder: 1,
@@ -136,6 +136,7 @@ test('getHomepageCategories: preserves DB ordering and maps subcategories throug
   const restore = stub([], 'category', 'findMany', () => rows);
   let result;
   try {
+    // No lang arg → default 'ar'.
     result = await getHomepageCategories();
   } finally {
     restore();
@@ -148,31 +149,64 @@ test('getHomepageCategories: preserves DB ordering and maps subcategories throug
       'id',
       'imageUrl',
       'name',
-      'nameAr',
       'slug',
       'sortOrder',
       'subCategories',
     ]);
-    // Lowercase Prisma back-relation is not on the wire.
+    // nameAr must be dropped from the wire; the lowercase Prisma back-relation
+    // also stays off the wire.
+    assert.equal((card as unknown as Record<string, unknown>).nameAr, undefined);
     assert.equal(
       (card as unknown as Record<string, unknown>).subcategories,
       undefined,
     );
     assert.ok(Array.isArray(card.subCategories));
   }
+  // Default lang 'ar' → localized name comes from `nameAr`.
+  assert.equal(result[0].name, 'ألبان');
+  assert.equal(result[1].name, 'وجبات');
   assert.equal(result[0].imageUrl, getCategoryImageUrl('dairy'));
 
   // Subcategory contents + image resolution.
   assert.equal(result[0].subCategories.length, 2);
   assert.equal(result[0].subCategories[0].id, 'sub_1');
+  assert.equal(result[0].subCategories[0].name, 'حليب');
   assert.equal(result[0].subCategories[0].imageUrl, getCategoryImageUrl('milk'));
+  assert.equal(result[0].subCategories[1].name, 'جبن');
   assert.equal(
     result[0].subCategories[1].imageUrl,
     'https://cdn.example.net/Subcategories/cheese.webp',
   );
+  for (const sub of result[0].subCategories) {
+    assert.equal(
+      (sub as unknown as Record<string, unknown>).nameAr,
+      undefined,
+      'subcategory nameAr must be dropped from the wire',
+    );
+  }
 
   // Empty case → `[]`, category still returned.
   assert.deepEqual(result[1].subCategories, []);
+});
+
+test('getHomepageCategories: lang="en" picks English name for category and subcategories', async () => {
+  const rows = [
+    {
+      id: 'c1', name: 'Dairy', nameAr: 'ألبان', slug: 'dairy', sortOrder: 1,
+      subcategories: [
+        { id: 'sub_1', name: 'Milk', nameAr: 'حليب', slug: 'milk', imageUrl: null, sortOrder: 1 },
+      ],
+    },
+  ];
+  const restore = stub([], 'category', 'findMany', () => rows);
+  let result;
+  try {
+    result = await getHomepageCategories('en');
+  } finally {
+    restore();
+  }
+  assert.equal(result[0].name, 'Dairy');
+  assert.equal(result[0].subCategories[0].name, 'Milk');
 });
 
 // ── Product cards (all-products path) ────────────────────────────────

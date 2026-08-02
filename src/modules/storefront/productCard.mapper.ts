@@ -136,28 +136,32 @@ export function toProductCard(row: ProductRow, available?: boolean): ProductCard
  * of `decorate()` in `lib/productImage.ts` for subcategory rows and keeps
  * the wire URL populated even for subcategories the admin has not curated.
  */
-export function toSubcategoryCard(row: SubcategoryRow): HomeSubcategoryCard {
+export function toSubcategoryCard(
+  row: SubcategoryRow,
+  lang: 'ar' | 'en' = 'ar',
+): HomeSubcategoryCard {
   const stored = typeof row.imageUrl === 'string' ? row.imageUrl.trim() : '';
   return {
     id: row.id,
-    name: row.name,
-    nameAr: row.nameAr,
+    name: lang === 'ar' ? row.nameAr : row.name,
     slug: row.slug,
     imageUrl: stored.length > 0 ? stored : getCategoryImageUrl(row.slug),
     sortOrder: row.sortOrder,
   };
 }
 
-export function toCategoryCard(row: CategoryRow): HomeCategoryCard {
+export function toCategoryCard(
+  row: CategoryRow,
+  lang: 'ar' | 'en' = 'ar',
+): HomeCategoryCard {
   const subs = Array.isArray(row.subcategories) ? row.subcategories : [];
   return {
     id: row.id,
-    name: row.name,
-    nameAr: row.nameAr,
+    name: lang === 'ar' ? row.nameAr : row.name,
     slug: row.slug,
     imageUrl: getCategoryImageUrl(row.slug),
     sortOrder: row.sortOrder,
-    subCategories: subs.map(toSubcategoryCard),
+    subCategories: subs.map((sub) => toSubcategoryCard(sub, lang)),
   };
 }
 

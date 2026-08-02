@@ -56,15 +56,84 @@ export const productPaths = {
     },
   },
 
+  '/products/list': {
+    post: {
+      tags: ['Products'],
+      summary: 'Marketplace product list (public, localized)',
+      description:
+        'Returns active products in the slim `MarketplaceProduct` shape (single localized `name` and `description`; nested `category`, `subcategory`, `brand` also localized). Legacy `GET /products` is kept for admin / backward compatibility.',
+      requestBody: {
+        required: false,
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/MarketplaceProductListRequest' },
+          },
+        },
+      },
+      responses: {
+        '200': success({
+          type: 'object',
+          required: ['products', 'pagination'],
+          properties: {
+            products: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/MarketplaceProduct' },
+            },
+            pagination: { $ref: '#/components/schemas/Pagination' },
+          },
+        }),
+      },
+    },
+  },
+
+  '/products/detail': {
+    post: {
+      tags: ['Products'],
+      summary: 'Marketplace product detail (public, localized)',
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/MarketplaceProductDetailRequest' },
+          },
+        },
+      },
+      responses: {
+        '200': success({ $ref: '#/components/schemas/MarketplaceProduct' }),
+        '400': errorResponses['400'],
+        '404': errorResponses['404'],
+      },
+    },
+  },
+
   '/products/featured': {
     get: {
       tags: ['Products'],
-      summary: 'Featured products for the storefront home (public)',
-      description: 'Returns products with `isFeatured=true` and `hideFromHome=false`.',
+      summary: 'Featured products (legacy public, bilingual)',
+      description:
+        'Legacy bilingual featured list. Prefer `POST /products/featured` for the new localized shape.',
       responses: {
         '200': success({
           type: 'array',
           items: { $ref: '#/components/schemas/Product' },
+        }),
+      },
+    },
+    post: {
+      tags: ['Products'],
+      summary: 'Marketplace featured products (public, localized)',
+      requestBody: {
+        required: false,
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/MarketplaceFeaturedRequest' },
+          },
+        },
+      },
+      responses: {
+        '200': success({
+          type: 'array',
+          items: { $ref: '#/components/schemas/MarketplaceProduct' },
         }),
       },
     },
@@ -73,7 +142,8 @@ export const productPaths = {
   '/products/search': {
     get: {
       tags: ['Products'],
-      summary: 'Storefront search (public)',
+      summary: 'Storefront search (legacy public, bilingual)',
+      description: 'Legacy bilingual search. Prefer `POST /products/search` for the localized shape.',
       parameters: [
         { in: 'query', name: 'q', required: true, schema: { type: 'string' } },
         ...paginationQueryParams,
@@ -91,12 +161,41 @@ export const productPaths = {
         }),
       },
     },
+    post: {
+      tags: ['Products'],
+      summary: 'Marketplace search (public, localized)',
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/MarketplaceSearchRequest' },
+          },
+        },
+      },
+      responses: {
+        '200': success({
+          type: 'object',
+          required: ['products', 'matchedProductId', 'pagination'],
+          properties: {
+            products: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/MarketplaceProduct' },
+            },
+            matchedProductId: { type: 'string', nullable: true },
+            pagination: { $ref: '#/components/schemas/Pagination' },
+          },
+        }),
+        '400': errorResponses['400'],
+      },
+    },
   },
 
   '/products/search/suggestions': {
     get: {
       tags: ['Products'],
-      summary: 'Autocomplete suggestions for search box (public)',
+      summary: 'Autocomplete suggestions (legacy public, bilingual)',
+      description:
+        'Legacy bilingual suggestions. Prefer `POST /products/search/suggestions` for the localized shape.',
       parameters: [{ in: 'query', name: 'q', required: true, schema: { type: 'string' } }],
       responses: {
         '200': success({
@@ -111,6 +210,25 @@ export const productPaths = {
             },
           },
         }),
+      },
+    },
+    post: {
+      tags: ['Products'],
+      summary: 'Marketplace typeahead suggestions (public, localized)',
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/MarketplaceSuggestionsRequest' },
+          },
+        },
+      },
+      responses: {
+        '200': success({
+          type: 'array',
+          items: { $ref: '#/components/schemas/MarketplaceProductSuggestion' },
+        }),
+        '400': errorResponses['400'],
       },
     },
   },

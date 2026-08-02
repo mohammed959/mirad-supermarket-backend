@@ -244,7 +244,7 @@ test('toProductCard tolerates a frozen input row', () => {
 });
 
 // ── HomeCategoryCard ────────────────────────────────────────────────
-test('toCategoryCard returns the seven DTO fields and drops the lowercase back-relation', () => {
+test('toCategoryCard returns the six DTO fields (no nameAr) and drops the lowercase back-relation', () => {
   const row = {
     ...categoryRow(),
     isActive: true,
@@ -260,14 +260,25 @@ test('toCategoryCard returns the seven DTO fields and drops the lowercase back-r
     'id',
     'imageUrl',
     'name',
-    'nameAr',
     'slug',
     'sortOrder',
     'subCategories',
   ]);
+  // nameAr must not leak onto the wire.
+  assert.equal((card as unknown as Record<string, unknown>).nameAr, undefined);
   // The lowercase Prisma back-relation is not on the wire — only camelCase `subCategories` is.
   assert.equal((card as unknown as Record<string, unknown>).subcategories, undefined);
   assert.ok(Array.isArray(card.subCategories));
+});
+
+test('toCategoryCard default lang="ar" localizes name from nameAr', () => {
+  const card = toCategoryCard(categoryRow());
+  assert.equal(card.name, categoryRow().nameAr);
+});
+
+test('toCategoryCard lang="en" picks English name from row.name', () => {
+  const card = toCategoryCard(categoryRow(), 'en');
+  assert.equal(card.name, categoryRow().name);
 });
 
 test('HomeCategoryCard.imageUrl derives from slug via getCategoryImageUrl', () => {
@@ -282,7 +293,7 @@ test('toCategoryCard returns subCategories: [] when the input has no subcategori
   assert.deepEqual(card.subCategories, []);
 });
 
-test('toCategoryCard maps each subcategory through toSubcategoryCard', () => {
+test('toCategoryCard maps each subcategory through toSubcategoryCard with the same lang', () => {
   const row: CategoryRow = {
     ...categoryRow(),
     subcategories: [
@@ -290,10 +301,12 @@ test('toCategoryCard maps each subcategory through toSubcategoryCard', () => {
       { id: 'sub_2', name: 'Cream', nameAr: 'كريمة', slug: 'cream', imageUrl: 'https://cdn.example.net/Subcategories/cream.webp', sortOrder: 2 },
     ],
   };
-  const card = toCategoryCard(row);
+  const card = toCategoryCard(row, 'en');
   assert.equal(card.subCategories.length, 2);
-  assert.deepEqual(card.subCategories[0], toSubcategoryCard(row.subcategories![0]));
-  assert.deepEqual(card.subCategories[1], toSubcategoryCard(row.subcategories![1]));
+  assert.deepEqual(card.subCategories[0], toSubcategoryCard(row.subcategories![0], 'en'));
+  assert.deepEqual(card.subCategories[1], toSubcategoryCard(row.subcategories![1], 'en'));
+  assert.equal(card.subCategories[0].name, 'Milk');
+  assert.equal(card.subCategories[1].name, 'Cream');
 });
 
 test('toCategoryCard does not mutate its input row', () => {
@@ -337,16 +350,26 @@ test('toSubcategoryCard falls back to slug-derived URL when stored is empty or w
   }
 });
 
-test('toSubcategoryCard returns exactly the six DTO fields', () => {
+test('toSubcategoryCard returns exactly the five DTO fields (no nameAr)', () => {
   const card = toSubcategoryCard(subRow());
   assert.deepEqual(Object.keys(card).sort(), [
     'id',
     'imageUrl',
     'name',
-    'nameAr',
     'slug',
     'sortOrder',
   ]);
+  assert.equal((card as unknown as Record<string, unknown>).nameAr, undefined);
+});
+
+test('toSubcategoryCard default lang="ar" picks nameAr as name', () => {
+  const card = toSubcategoryCard(subRow({ name: 'Milk', nameAr: 'حليب' }));
+  assert.equal(card.name, 'حليب');
+});
+
+test('toSubcategoryCard lang="en" picks name as name', () => {
+  const card = toSubcategoryCard(subRow({ name: 'Milk', nameAr: 'حليب' }), 'en');
+  assert.equal(card.name, 'Milk');
 });
 
 test('toSubcategoryCard does not mutate its input row', () => {

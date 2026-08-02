@@ -317,6 +317,189 @@ export const schemas = {
       isActive: { type: 'boolean' },
     },
   },
+  MarketplaceCategoryListRequest: {
+    type: 'object',
+    description:
+      'Body for `POST /api/categories/list`. All fields optional; missing / invalid `lang` falls back to `"ar"`.',
+    properties: {
+      lang: {
+        type: 'string',
+        enum: ['ar', 'en'],
+        description: 'Language for the returned `name` field. Defaults to `"ar"`.',
+        example: 'ar',
+      },
+    },
+  },
+
+  // ── Marketplace product schemas (POST /api/products/*) ─────────────
+  //
+  // Every field that was `name` + `nameAr` on the legacy Product shape is
+  // collapsed to a single localized `name` here (top-level and nested).
+  // `description`/`descriptionAr` collapses to a single `description | null`.
+  MarketplaceCategoryLite: {
+    type: 'object',
+    required: ['id', 'name', 'slug'],
+    properties: {
+      id: { type: 'string', example: 'clw7cat1' },
+      name: {
+        type: 'string',
+        description: 'Localized per request-body `lang` (default `"ar"`).',
+        example: 'الألبان والبيض',
+      },
+      slug: { type: 'string', example: 'dairy-eggs' },
+    },
+  },
+  MarketplaceBrandLite: {
+    type: 'object',
+    required: ['id', 'name', 'slug', 'imageUrl'],
+    properties: {
+      id: { type: 'string', example: 'clw7brand1' },
+      name: {
+        type: 'string',
+        description: 'Localized per request-body `lang` (default `"ar"`).',
+        example: 'المراعي',
+      },
+      slug: { type: 'string', example: 'almarai' },
+      imageUrl: { type: 'string', nullable: true, example: 'https://cdn.example/brands/almarai.png' },
+    },
+  },
+  MarketplaceProduct: {
+    type: 'object',
+    required: [
+      'id', 'name', 'description', 'sku', 'barcode', 'price', 'stock', 'reserved',
+      'isActive', 'isFeatured', 'hideFromHome', 'imageUrl',
+      'categoryId', 'subcategoryId', 'brandId',
+      'category', 'subcategory', 'brand',
+      'createdAt', 'updatedAt', 'available', 'offer',
+    ],
+    description:
+      'Slim marketplace product. `nameAr` and `descriptionAr` are intentionally omitted — the single `name` and `description` fields are already localized per request-body `lang` (default `"ar"`). Nested `category` / `subcategory` / `brand` are localized the same way.',
+    properties: {
+      id: { type: 'string', example: 'clw7prod1' },
+      name: { type: 'string', example: 'حليب المراعي كامل الدسم 1 لتر' },
+      description: { type: 'string', nullable: true, example: 'حليب طازج ' },
+      sku: { type: 'string', nullable: true, example: 'ALM-MLK-1L' },
+      barcode: { type: 'string', nullable: true, example: '6281007054124' },
+      price: {
+        type: 'string',
+        nullable: true,
+        description: 'Decimal-string wire format (matches Prisma Decimal serialization).',
+        example: '6.5',
+      },
+      stock: { type: 'integer', example: 120 },
+      reserved: { type: 'integer', example: 4 },
+      isActive: { type: 'boolean', example: true },
+      isFeatured: { type: 'boolean', example: false },
+      hideFromHome: { type: 'boolean', example: false },
+      imageUrl: { type: 'string', nullable: true },
+      categoryId: { type: 'string' },
+      subcategoryId: { type: 'string', nullable: true },
+      brandId: { type: 'string', nullable: true },
+      category: {
+        oneOf: [{ $ref: '#/components/schemas/MarketplaceCategoryLite' }, { type: 'null' }],
+      },
+      subcategory: {
+        oneOf: [{ $ref: '#/components/schemas/MarketplaceCategoryLite' }, { type: 'null' }],
+      },
+      brand: {
+        oneOf: [{ $ref: '#/components/schemas/MarketplaceBrandLite' }, { type: 'null' }],
+      },
+      createdAt: { type: 'string', format: 'date-time' },
+      updatedAt: { type: 'string', format: 'date-time' },
+      available: { type: 'boolean', description: '`product.isActive && (stock - reserved) > 0`.' },
+      offer: { type: 'number', example: 0, description: 'Placeholder offer field. Always `0` for now — no logic behind it yet.' },
+    },
+  },
+  MarketplaceProductSuggestion: {
+    type: 'object',
+    required: ['id', 'name', 'sku', 'imageUrl', 'offer'],
+    properties: {
+      id: { type: 'string' },
+      name: {
+        type: 'string',
+        description: 'Localized per request-body `lang` (default `"ar"`).',
+      },
+      sku: { type: 'string', nullable: true },
+      imageUrl: { type: 'string', nullable: true },
+      offer: { type: 'number', example: 0, description: 'Placeholder offer field. Always `0` for now.' },
+    },
+  },
+
+  // ── Marketplace request bodies ────────────────────────────────────
+  MarketplaceProductListRequest: {
+    type: 'object',
+    description:
+      'Body for `POST /api/products/list`. Every field optional; missing / invalid `lang` falls back to `"ar"`.',
+    properties: {
+      lang: { type: 'string', enum: ['ar', 'en'], example: 'ar' },
+      page: { type: 'integer', minimum: 1, example: 1 },
+      pageSize: { type: 'integer', minimum: 1, maximum: 100, example: 20 },
+      categoryId: { type: 'string' },
+      subcategoryId: { type: 'string' },
+      brandId: { type: 'string' },
+      ids: { type: 'array', items: { type: 'string' } },
+      featured: { type: 'boolean' },
+      includeOutOfStock: { type: 'boolean' },
+      excludeHiddenFromHome: { type: 'boolean' },
+    },
+  },
+  MarketplaceProductDetailRequest: {
+    type: 'object',
+    required: ['id'],
+    properties: {
+      id: { type: 'string', example: 'clw7prod1' },
+      lang: { type: 'string', enum: ['ar', 'en'], example: 'ar' },
+    },
+  },
+  MarketplaceFeaturedRequest: {
+    type: 'object',
+    properties: {
+      lang: { type: 'string', enum: ['ar', 'en'], example: 'ar' },
+      limit: { type: 'integer', minimum: 1, maximum: 100, example: 20 },
+    },
+  },
+  MarketplaceSearchRequest: {
+    type: 'object',
+    required: ['q'],
+    properties: {
+      q: { type: 'string', example: 'milk' },
+      lang: { type: 'string', enum: ['ar', 'en'], example: 'ar' },
+      page: { type: 'integer', minimum: 1, example: 1 },
+      pageSize: { type: 'integer', minimum: 1, maximum: 100, example: 20 },
+      barcode: { type: 'string' },
+    },
+  },
+  MarketplaceSuggestionsRequest: {
+    type: 'object',
+    required: ['q'],
+    properties: {
+      q: { type: 'string', example: 'mil' },
+      lang: { type: 'string', enum: ['ar', 'en'], example: 'ar' },
+      limit: { type: 'integer', minimum: 1, maximum: 50, example: 8 },
+    },
+  },
+  MarketplaceCategoryCard: {
+    type: 'object',
+    required: ['id', 'name', 'slug', 'imageUrl', 'sortOrder'],
+    description:
+      'Slim marketplace category card returned by `POST /api/categories/list`. Excludes `nameAr`, admin flags, subcategories, and audit timestamps.',
+    properties: {
+      id: { type: 'string', example: 'clw7cat1' },
+      name: {
+        type: 'string',
+        description: 'Localized per request-body `lang` (default `"ar"`).',
+        example: 'الألبان والبيض',
+      },
+      slug: { type: 'string', example: 'dairy-eggs' },
+      imageUrl: {
+        type: 'string',
+        description:
+          'Admin-supplied stored URL when set; otherwise the slug-derived Bunny URL.',
+        example: 'https://cdn.example.net/category/dairy-eggs.png',
+      },
+      sortOrder: { type: 'integer', example: 1 },
+    },
+  },
 
   // ── Product / Brand ─────────────────────────────────────────────────
   Product: {
@@ -1095,13 +1278,30 @@ export const schemas = {
     },
   },
 
+  StorefrontHomeRequest: {
+    type: 'object',
+    description:
+      'Body for `POST /api/storefront/home`. All fields optional; missing / invalid `lang` falls back to `"ar"`. `lang` currently localizes `categories[].name` and `subCategories[].name`; other sections stay bilingual.',
+    properties: {
+      lang: {
+        type: 'string',
+        enum: ['ar', 'en'],
+        description: 'Language for category / subcategory `name`. Defaults to `"ar"`.',
+        example: 'ar',
+      },
+    },
+  },
+
   StorefrontHomeSubcategoryCard: {
     type: 'object',
-    required: ['id', 'name', 'nameAr', 'slug', 'imageUrl', 'sortOrder'],
+    required: ['id', 'name', 'slug', 'imageUrl', 'sortOrder'],
     properties: {
       id: { type: 'string', example: 'clw7sub1' },
-      name: { type: 'string', example: 'Milk' },
-      nameAr: { type: 'string', example: 'حليب' },
+      name: {
+        type: 'string',
+        description: 'Localized per request-body `lang` (default `"ar"`).',
+        example: 'حليب',
+      },
       slug: { type: 'string', example: 'dairy-milk' },
       imageUrl: {
         type: 'string',
@@ -1112,16 +1312,19 @@ export const schemas = {
       sortOrder: { type: 'integer', example: 1 },
     },
     description:
-      'Slim homepage subcategory card. Included under `StorefrontHomeCategoryCard.subCategories`. Excludes `categoryId`, `isActive`, and audit fields — the home page never renders them.',
+      'Slim homepage subcategory card. Included under `StorefrontHomeCategoryCard.subCategories`. Excludes `categoryId`, `isActive`, `nameAr`, and audit fields — the home page never renders them.',
   },
 
   StorefrontHomeCategoryCard: {
     type: 'object',
-    required: ['id', 'name', 'nameAr', 'slug', 'imageUrl', 'sortOrder', 'subCategories'],
+    required: ['id', 'name', 'slug', 'imageUrl', 'sortOrder', 'subCategories'],
     properties: {
       id: { type: 'string', example: 'clw7cat1' },
-      name: { type: 'string', example: 'Dairy & Eggs' },
-      nameAr: { type: 'string', example: 'الألبان والبيض' },
+      name: {
+        type: 'string',
+        description: 'Localized per request-body `lang` (default `"ar"`).',
+        example: 'الألبان والبيض',
+      },
       slug: { type: 'string', example: 'dairy-eggs' },
       imageUrl: {
         type: 'string',
@@ -1138,7 +1341,7 @@ export const schemas = {
       },
     },
     description:
-      'Slim homepage category card. Excludes `isActive`, `createdAt`, `updatedAt`. Carries only active subcategories via `subCategories`.',
+      'Slim homepage category card. Excludes `isActive`, `nameAr`, `createdAt`, `updatedAt`. Carries only active subcategories via `subCategories`.',
   },
 
   StorefrontHomeBanner: {

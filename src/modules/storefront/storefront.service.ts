@@ -29,6 +29,7 @@ import * as settingsSvc from '../settings/settings.service';
 
 import { toBanner, type BannerRow } from './productCard.mapper';
 import type { HomeAggregate } from './storefront.types';
+import type { Lang } from '../categories/category.schema';
 
 /**
  * Read the admin-configured all-products page size defensively.
@@ -81,11 +82,11 @@ function resolveAllProductsLimit(raw: unknown): number {
  * Any rejected dependency short-circuits the whole call — Stage 2 never
  * starts on a Stage 1 failure because `Promise.all` rejects immediately.
  */
-export async function getStorefrontHome(): Promise<HomeAggregate> {
+export async function getStorefrontHome(lang: Lang = 'ar'): Promise<HomeAggregate> {
   // ─── Stage 1 — parallel public reads ────────────────────────────────
   const [categories, bannerRows, featuredProducts, featuredSections, settings] =
     await Promise.all([
-      categorySvc.getHomepageCategories(),
+      categorySvc.getHomepageCategories(lang),
       bannerSvc.listBanners(true),
       productSvc.listFeaturedProductCardsForHome(),
       sectionSvc.listSectionsForHome(),

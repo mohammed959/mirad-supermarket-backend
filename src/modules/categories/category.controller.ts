@@ -3,12 +3,37 @@ import * as svc from './category.service';
 import { ok, created, noContent, notFound } from '../../lib/response';
 import { importCategoriesFromExcel, buildCategoryTemplate } from './category.import';
 import { AuthRequest } from '../../middleware/auth.middleware';
+import { parseLang } from './category.schema';
 
-export async function list(req: Request, res: Response): Promise<void> {
+/**
+ * Admin list: `GET /api/categories/admin` (staff only).
+ *
+ * Returns the full historical shape (id, name, nameAr, slug, imageUrl,
+ * sortOrder, isActive, showOnHome, createdAt, updatedAt, subcategories[])
+ * so admin UIs — the category tree, promotion pickers, imports — keep
+ * working unchanged.
+ *
+ * Query params (preserved from the previous public GET):
+ *   • `?all=true`  — include inactive categories/subcategories.
+ *   • `?home=true` — only categories flagged to show on the marketplace home.
+ */
+export async function listAdmin(req: Request, res: Response): Promise<void> {
   const activeOnly = req.query.all !== 'true';
-  // `?home=true` → only active categories flagged to show on the home strip.
   const homeOnly = req.query.home === 'true';
   const data = await svc.getCategories(activeOnly, homeOnly);
+  ok(res, data);
+}
+
+/**
+ * Marketplace list: `POST /api/categories/list` (public).
+ *
+ * Body: `{ lang?: 'ar' | 'en' }` — default `'ar'`. Returns only active
+ * categories in the stripped shape defined by `MarketplaceCategoryCard`
+ * (no `nameAr`, no subcategories, no admin flags, no audit timestamps).
+ */
+export async function listMarketplace(req: Request, res: Response): Promise<void> {
+  const lang = parseLang(req.body);
+  const data = await svc.listMarketplaceCategories(lang);
   ok(res, data);
 }
 

@@ -20,8 +20,8 @@
 
 export interface HomeSubcategoryCard {
   id: string;
+  /** Localized per request-body `lang` (`'ar' | 'en'`, default `'ar'`). */
   name: string;
-  nameAr: string;
   slug: string;
   imageUrl: string;
   sortOrder: number;
@@ -29,8 +29,8 @@ export interface HomeSubcategoryCard {
 
 export interface HomeCategoryCard {
   id: string;
+  /** Localized per request-body `lang` (`'ar' | 'en'`, default `'ar'`). */
   name: string;
-  nameAr: string;
   slug: string;
   imageUrl: string;
   sortOrder: number;

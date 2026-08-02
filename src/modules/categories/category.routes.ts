@@ -14,8 +14,14 @@ const upload = multer({
 router.get('/import/template', authenticateStaff, asyncHandler(ctrl.downloadTemplate));
 router.post('/import/excel', authenticateStaff, upload.single('file'), asyncHandler(ctrl.importExcel));
 
-// Public
-router.get('/', asyncHandler(ctrl.list));
+// Admin full list (staff only) — full historical shape, supports ?all=true & ?home=true.
+// Must come before '/:id' so 'admin' isn't matched as an id.
+router.get('/admin', authenticateStaff, asyncHandler(ctrl.listAdmin));
+
+// Public marketplace list — POST with { lang } body, stripped shape.
+router.post('/list', asyncHandler(ctrl.listMarketplace));
+
+// Public per-category read (used by product-list page to fetch subcategories).
 router.get('/:id', asyncHandler(ctrl.getOne));
 
 // Admin only (staff)

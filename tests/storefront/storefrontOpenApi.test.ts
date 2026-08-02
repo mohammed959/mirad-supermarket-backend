@@ -64,19 +64,35 @@ test('path prefix matches the file-wide convention (relative to /api, no /api in
   assert.ok('/storefront/home' in paths);
 });
 
-test('GET /storefront/home operation exists with the required OpenAPI fields', () => {
+test('POST /storefront/home operation exists with the required OpenAPI fields', () => {
   const op = ((openapiSpec.paths as Record<string, Record<string, unknown>>)['/storefront/home']
-    .get) as Record<string, unknown>;
-  assert.ok(op, 'GET operation must exist');
+    .post) as Record<string, unknown>;
+  assert.ok(op, 'POST operation must exist');
   assert.ok(Array.isArray(op.tags) && (op.tags as string[]).includes('Storefront'));
   assert.equal(typeof op.summary, 'string');
   assert.equal(typeof op.description, 'string');
   assert.ok(op.responses);
+  // GET must NOT be documented for this path — the endpoint is POST-only.
+  const rec = ((openapiSpec.paths as Record<string, Record<string, unknown>>)['/storefront/home']) as Record<string, unknown>;
+  assert.equal(rec.get, undefined, 'GET on /storefront/home must not be documented');
+});
+
+test('POST body references StorefrontHomeRequest', () => {
+  const op = ((openapiSpec.paths as Record<string, Record<string, unknown>>)['/storefront/home']
+    .post) as Record<string, unknown>;
+  const body = op.requestBody as {
+    content: { 'application/json': { schema: { $ref?: string } } };
+  } | undefined;
+  assert.ok(body, 'POST requestBody must be documented');
+  assert.equal(
+    body.content['application/json'].schema.$ref,
+    '#/components/schemas/StorefrontHomeRequest',
+  );
 });
 
 test('operation is public — no per-operation security block', () => {
   const op = ((openapiSpec.paths as Record<string, Record<string, unknown>>)['/storefront/home']
-    .get) as Record<string, unknown>;
+    .post) as Record<string, unknown>;
   // Convention: public endpoints omit `security` entirely. There is no
   // root-level `security` array, so absence here means unauthenticated.
   assert.equal((op as Record<string, unknown>).security, undefined);
@@ -85,7 +101,7 @@ test('operation is public — no per-operation security block', () => {
 
 test('200 response documents Cache-Control: no-cache', () => {
   const op = ((openapiSpec.paths as Record<string, Record<string, unknown>>)['/storefront/home']
-    .get) as Record<string, Record<string, unknown>>;
+    .post) as Record<string, Record<string, unknown>>;
   const ok = op.responses['200'] as Record<string, unknown>;
   assert.ok(ok, '200 response required');
   const headers = ok.headers as Record<string, { schema: { example?: string } }>;
@@ -96,7 +112,7 @@ test('200 response documents Cache-Control: no-cache', () => {
 
 test('Cache-Control description does not guarantee a 304 on every unchanged response', () => {
   const op = ((openapiSpec.paths as Record<string, Record<string, unknown>>)['/storefront/home']
-    .get) as Record<string, Record<string, unknown>>;
+    .post) as Record<string, Record<string, unknown>>;
   const ok = op.responses['200'] as {
     headers: Record<string, { description: string }>;
   };
@@ -127,7 +143,7 @@ test('Cache-Control description does not guarantee a 304 on every unchanged resp
 
 test('Cache-Control description accurately explains revalidation and conditional 304 behavior', () => {
   const op = ((openapiSpec.paths as Record<string, Record<string, unknown>>)['/storefront/home']
-    .get) as Record<string, Record<string, unknown>>;
+    .post) as Record<string, Record<string, unknown>>;
   const ok = op.responses['200'] as {
     headers: Record<string, { description: string }>;
   };
@@ -143,7 +159,7 @@ test('Cache-Control description accurately explains revalidation and conditional
 
 test('500 response is documented via the shared error envelope', () => {
   const op = ((openapiSpec.paths as Record<string, Record<string, unknown>>)['/storefront/home']
-    .get) as Record<string, Record<string, unknown>>;
+    .post) as Record<string, Record<string, unknown>>;
   const err = op.responses['500'] as {
     content: {
       'application/json': { schema: Record<string, string> };
@@ -218,15 +234,16 @@ test('storefront component schemas do not leak forbidden ProductCard fields', ()
   );
 });
 
-test('StorefrontHomeCategoryCard exposes subCategories (camelCase) and drops isActive/audit fields', () => {
+test('StorefrontHomeCategoryCard exposes subCategories (camelCase) and drops nameAr/isActive/audit fields', () => {
   const cat = ((openapiSpec.components as Record<string, unknown>).schemas as Record<
     string,
     { properties: Record<string, unknown> }
   >).StorefrontHomeCategoryCard;
   const keys = Object.keys(cat.properties).sort();
-  assert.deepEqual(keys, ['id', 'imageUrl', 'name', 'nameAr', 'slug', 'sortOrder', 'subCategories']);
-  // Lowercase Prisma back-relation is never exposed on the wire.
-  for (const forbidden of ['subcategories', 'isActive', 'createdAt', 'updatedAt']) {
+  assert.deepEqual(keys, ['id', 'imageUrl', 'name', 'slug', 'sortOrder', 'subCategories']);
+  // Lowercase Prisma back-relation is never exposed on the wire; nameAr is
+  // dropped now that the endpoint returns the localized `name` only.
+  for (const forbidden of ['subcategories', 'nameAr', 'isActive', 'createdAt', 'updatedAt']) {
     assert.equal(cat.properties[forbidden], undefined);
   }
   // subCategories → array of $ref StorefrontHomeSubcategoryCard.
@@ -238,19 +255,19 @@ test('StorefrontHomeCategoryCard exposes subCategories (camelCase) and drops isA
   assert.equal(subs.items?.$ref, '#/components/schemas/StorefrontHomeSubcategoryCard');
 });
 
-test('StorefrontHomeSubcategoryCard exposes exactly the six DTO fields, non-nullable, all required', () => {
+test('StorefrontHomeSubcategoryCard exposes exactly the five DTO fields (no nameAr), non-nullable, all required', () => {
   const sub = ((openapiSpec.components as Record<string, unknown>).schemas as Record<
     string,
     { properties: Record<string, { nullable?: boolean }>; required?: string[] }
   >).StorefrontHomeSubcategoryCard;
   const keys = Object.keys(sub.properties).sort();
-  assert.deepEqual(keys, ['id', 'imageUrl', 'name', 'nameAr', 'slug', 'sortOrder']);
-  assert.deepEqual([...(sub.required ?? [])].sort(), ['id', 'imageUrl', 'name', 'nameAr', 'slug', 'sortOrder']);
+  assert.deepEqual(keys, ['id', 'imageUrl', 'name', 'slug', 'sortOrder']);
+  assert.deepEqual([...(sub.required ?? [])].sort(), ['id', 'imageUrl', 'name', 'slug', 'sortOrder']);
   for (const p of keys) {
     assert.notEqual(sub.properties[p].nullable, true, `${p} must be non-nullable`);
   }
-  // Must not leak Prisma-only fields.
-  for (const forbidden of ['categoryId', 'isActive', 'createdAt', 'updatedAt']) {
+  // Must not leak Prisma-only fields (and must not resurrect nameAr).
+  for (const forbidden of ['nameAr', 'categoryId', 'isActive', 'createdAt', 'updatedAt']) {
     assert.equal(sub.properties[forbidden], undefined);
   }
 });
@@ -381,15 +398,15 @@ test('ProductCard.price: string | null wire representation is enforced', () => {
 
 test('StorefrontHomeCategoryCard: nullability + required match the DTO exactly', () => {
   assertRequiredEqualsAllKeys('StorefrontHomeCategoryCard');
-  // All seven fields non-nullable in the DTO (subCategories is an array, never null).
-  for (const p of ['id', 'name', 'nameAr', 'slug', 'imageUrl', 'sortOrder', 'subCategories']) {
+  // Six fields non-nullable in the DTO (subCategories is an array, never null).
+  for (const p of ['id', 'name', 'slug', 'imageUrl', 'sortOrder', 'subCategories']) {
     assertPropNullable('StorefrontHomeCategoryCard', p, false);
   }
 });
 
 test('StorefrontHomeSubcategoryCard: nullability + required match the DTO exactly', () => {
   assertRequiredEqualsAllKeys('StorefrontHomeSubcategoryCard');
-  for (const p of ['id', 'name', 'nameAr', 'slug', 'imageUrl', 'sortOrder']) {
+  for (const p of ['id', 'name', 'slug', 'imageUrl', 'sortOrder']) {
     assertPropNullable('StorefrontHomeSubcategoryCard', p, false);
   }
 });
@@ -438,14 +455,12 @@ test('sanity: no storefront schema accidentally marks a DTO-non-nullable field a
     ['StorefrontProductCard', 'available'],
     ['StorefrontHomeCategoryCard', 'id'],
     ['StorefrontHomeCategoryCard', 'name'],
-    ['StorefrontHomeCategoryCard', 'nameAr'],
     ['StorefrontHomeCategoryCard', 'slug'],
     ['StorefrontHomeCategoryCard', 'imageUrl'],
     ['StorefrontHomeCategoryCard', 'sortOrder'],
     ['StorefrontHomeCategoryCard', 'subCategories'],
     ['StorefrontHomeSubcategoryCard', 'id'],
     ['StorefrontHomeSubcategoryCard', 'name'],
-    ['StorefrontHomeSubcategoryCard', 'nameAr'],
     ['StorefrontHomeSubcategoryCard', 'slug'],
     ['StorefrontHomeSubcategoryCard', 'imageUrl'],
     ['StorefrontHomeSubcategoryCard', 'sortOrder'],
@@ -469,7 +484,7 @@ test('sanity: no storefront schema accidentally marks a DTO-non-nullable field a
 
 test('response example is structurally consistent with the documented aggregate', () => {
   const op = ((openapiSpec.paths as Record<string, Record<string, unknown>>)['/storefront/home']
-    .get) as Record<string, Record<string, unknown>>;
+    .post) as Record<string, Record<string, unknown>>;
   const ok = op.responses['200'] as {
     content: {
       'application/json': { example: { success: boolean; message: string; data: Record<string, unknown> } };
@@ -486,7 +501,28 @@ test('response example is structurally consistent with the documented aggregate'
     'featuredProducts',
     'featuredSections',
   ]);
-  // Card in the example has exactly the ProductCard whitelisted keys.
+  // Category card in the example has the localized single-name shape with subCategories.
+  const anyCategory = (ex.data.categories as Array<Record<string, unknown>>)[0];
+  assert.deepEqual(Object.keys(anyCategory).sort(), [
+    'id',
+    'imageUrl',
+    'name',
+    'slug',
+    'sortOrder',
+    'subCategories',
+  ]);
+  assert.equal(anyCategory.nameAr, undefined, 'example category must not carry nameAr');
+  const anySub = (anyCategory.subCategories as Array<Record<string, unknown>>)[0];
+  assert.deepEqual(Object.keys(anySub).sort(), [
+    'id',
+    'imageUrl',
+    'name',
+    'slug',
+    'sortOrder',
+  ]);
+  assert.equal(anySub.nameAr, undefined, 'example subcategory must not carry nameAr');
+
+  // Featured product cards keep the bilingual shape (untouched sections).
   const anyCard = (ex.data.featuredProducts as Array<Record<string, unknown>>)[0];
   assert.deepEqual(Object.keys(anyCard).sort(), [
     'available',

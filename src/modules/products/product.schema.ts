@@ -1,4 +1,48 @@
 import { z } from 'zod';
+import { langBodySchema, parseLang, type Lang } from '../categories/category.schema';
+
+/**
+ * Public marketplace body schemas for `POST /api/products/*`.
+ *
+ * All fields are optional except `id` on `/detail` and `q` on `/search` +
+ * `/search/suggestions`. Missing / invalid `lang` falls back to `'ar'` per
+ * the shared category schema.
+ */
+export const listProductsBodySchema = langBodySchema.extend({
+  page: z.number().int().positive().optional(),
+  pageSize: z.number().int().min(1).max(100).optional(),
+  categoryId: z.string().min(1).optional(),
+  subcategoryId: z.string().min(1).optional(),
+  brandId: z.string().min(1).optional(),
+  ids: z.array(z.string().min(1)).optional(),
+  featured: z.boolean().optional(),
+  includeOutOfStock: z.boolean().optional(),
+  excludeHiddenFromHome: z.boolean().optional(),
+});
+
+export const productDetailBodySchema = langBodySchema.extend({
+  id: z.string().min(1),
+});
+
+export const featuredProductsBodySchema = langBodySchema.extend({
+  limit: z.number().int().min(1).max(100).optional(),
+});
+
+export const searchProductsBodySchema = langBodySchema.extend({
+  q: z.string().min(1),
+  page: z.number().int().positive().optional(),
+  pageSize: z.number().int().min(1).max(100).optional(),
+  barcode: z.string().optional(),
+});
+
+export const searchSuggestionsBodySchema = langBodySchema.extend({
+  q: z.string().min(1),
+  limit: z.number().int().min(1).max(50).optional(),
+});
+
+export { parseLang };
+export type { Lang };
+
 
 /**
  * Phase 1 product schema — flat: no variants array.

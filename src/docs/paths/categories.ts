@@ -54,16 +54,6 @@ export const categoryPaths = {
   },
 
   '/categories': {
-    get: {
-      tags: ['Categories'],
-      summary: 'List all active categories (public)',
-      responses: {
-        '200': success({
-          type: 'array',
-          items: { $ref: '#/components/schemas/Category' },
-        }),
-      },
-    },
     post: {
       tags: ['Categories'],
       summary: 'Create a category (staff only)',
@@ -79,6 +69,69 @@ export const categoryPaths = {
       responses: {
         '201': success({ $ref: '#/components/schemas/Category' }, 'Created'),
         '400': errorResponses['400'],
+        '403': errorResponses['403'],
+      },
+    },
+  },
+
+  '/categories/list': {
+    post: {
+      tags: ['Categories'],
+      summary: 'Marketplace category list (public, localized)',
+      description: [
+        'Returns only active categories in the slim marketplace shape used by the customer app.',
+        '',
+        'Body:',
+        '- `lang` (optional): `"ar"` or `"en"`. Missing / invalid values fall back to `"ar"`.',
+        '',
+        'Each item carries only `id`, `name` (localized), `slug`, `imageUrl`, `sortOrder`. Admin-only fields (`nameAr`, `isActive`, `showOnHome`, `createdAt`, `updatedAt`) and `subcategories` are intentionally omitted. Results are ordered by `sortOrder asc`.',
+      ].join('\n'),
+      requestBody: {
+        required: false,
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/MarketplaceCategoryListRequest' },
+          },
+        },
+      },
+      responses: {
+        '200': success({
+          type: 'array',
+          items: { $ref: '#/components/schemas/MarketplaceCategoryCard' },
+        }),
+      },
+    },
+  },
+
+  '/categories/admin': {
+    get: {
+      tags: ['Categories'],
+      summary: 'Full category tree for admin (staff only)',
+      description:
+        'Returns the full historical category shape including `nameAr`, `isActive`, `showOnHome`, `createdAt`, `updatedAt`, and the nested `subcategories[]` array. Used by the admin category manager, promotion drawer, and other staff-side UIs.',
+      security: bearerAuth,
+      parameters: [
+        {
+          in: 'query',
+          name: 'all',
+          required: false,
+          schema: { type: 'string', enum: ['true', 'false'] },
+          description: 'When `"true"`, include inactive categories and inactive subcategories.',
+        },
+        {
+          in: 'query',
+          name: 'home',
+          required: false,
+          schema: { type: 'string', enum: ['true', 'false'] },
+          description: 'When `"true"`, only categories flagged to show on the marketplace home.',
+        },
+      ],
+      responses: {
+        '200': success({
+          type: 'array',
+          items: { $ref: '#/components/schemas/Category' },
+        }),
+        '401': errorResponses['401'],
         '403': errorResponses['403'],
       },
     },

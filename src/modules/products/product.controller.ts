@@ -4,6 +4,12 @@ import {
   adjustStockSchema,
   createProductSchema,
   updateProductSchema,
+  listProductsBodySchema,
+  productDetailBodySchema,
+  featuredProductsBodySchema,
+  searchProductsBodySchema,
+  searchSuggestionsBodySchema,
+  parseLang,
 } from './product.schema';
 import { ok, created, noContent, notFound, badRequest } from '../../lib/response';
 
@@ -126,4 +132,82 @@ export async function downloadTemplate(_req: Request, res: Response): Promise<vo
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', 'attachment; filename="product-import-template.xlsx"');
   res.send(buffer);
+}
+
+// ─── Marketplace localized POST endpoints ──────────────────────────
+//
+// Each of these accepts a `{ lang }`-bearing JSON body and returns the
+// slim `MarketplaceProduct` shape (single localized `name` + `description`,
+// nested category/subcategory/brand also localized). Invalid / missing body
+// falls back to `lang: 'ar'` via `parseLang`.
+
+export async function marketplaceList(req: Request, res: Response): Promise<void> {
+  const parsed = listProductsBodySchema.safeParse(req.body ?? {});
+  const body = parsed.success ? parsed.data : {};
+  const lang = parseLang(req.body);
+  const data = await svc.listMarketplaceProducts({
+    lang,
+    categoryId: body.categoryId,
+    subcategoryId: body.subcategoryId,
+    brandId: body.brandId,
+    featured: body.featured,
+    ids: body.ids,
+    page: body.page ?? 1,
+    limit: body.pageSize ?? 20,
+    includeOutOfStock: body.includeOutOfStock,
+    excludeHiddenFromHome: body.excludeHiddenFromHome,
+  });
+  ok(res, data);
+}
+
+export async function marketplaceDetail(req: Request, res: Response): Promise<void> {
+  const parsed = productDetailBodySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    badRequest(res, 'id is required');
+    return;
+  }
+  const lang = parseLang(req.body);
+  const data = await svc.getMarketplaceProduct(parsed.data.id, lang);
+  if (!data) { notFound(res); return; }
+  ok(res, data);
+}
+
+export async function marketplaceFeatured(req: Request, res: Response): Promise<void> {
+  const parsed = featuredProductsBodySchema.safeParse(req.body ?? {});
+  const body = parsed.success ? parsed.data : {};
+  const lang = parseLang(req.body);
+  const data = await svc.listMarketplaceFeaturedProducts(lang, body.limit ?? 20);
+  ok(res, data);
+}
+
+export async function marketplaceSearch(req: Request, res: Response): Promise<void> {
+  const parsed = searchProductsBodySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    badRequest(res, 'q is required');
+    return;
+  }
+  const lang = parseLang(req.body);
+  const data = await svc.searchMarketplaceProducts({
+    q: parsed.data.q,
+    barcode: parsed.data.barcode,
+    page: parsed.data.page ?? 1,
+    limit: parsed.data.pageSize ?? 20,
+    lang,
+  });
+  ok(res, data);
+}
+
+export async function marketplaceSuggestions(req: Request, res: Response): Promise<void> {
+  const parsed = searchSuggestionsBodySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    badRequest(res, 'q is required');
+    return;
+  }
+  const lang = parseLang(req.body);
+  const data = await svc.marketplaceSearchSuggestions(
+    parsed.data.q,
+    lang,
+    parsed.data.limit ?? 8,
+  );
+  ok(res, data);
 }

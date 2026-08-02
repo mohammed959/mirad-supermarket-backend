@@ -4,6 +4,22 @@ import {
   type CategoryRow,
 } from '../storefront/productCard.mapper';
 import type { HomeCategoryCard } from '../storefront/storefront.types';
+import { getCategoryImageUrl } from '../../lib/productImage';
+import type { Lang } from './category.schema';
+
+/**
+ * Marketplace card returned by `POST /api/categories/list`.
+ *
+ * Stripped shape — no `nameAr`, `isActive`, `showOnHome`, `subcategories`,
+ * `createdAt`, `updatedAt`. `name` is the locale-picked field.
+ */
+export interface MarketplaceCategoryCard {
+  id: string;
+  name: string;
+  slug: string;
+  imageUrl: string;
+  sortOrder: number;
+}
 
 /**
  * Storefront-home optimised category read.
@@ -26,7 +42,7 @@ import type { HomeCategoryCard } from '../storefront/storefront.types';
  * URL and falls back to slug-derived only when it is null/empty — which
  * matches the decorator's subcategory branch.
  */
-export async function getHomepageCategories(): Promise<HomeCategoryCard[]> {
+export async function getHomepageCategories(lang: Lang = 'ar'): Promise<HomeCategoryCard[]> {
   const rows = await prisma.category.findMany({
     where: { isActive: true, showOnHome: true },
     select: {
@@ -50,7 +66,41 @@ export async function getHomepageCategories(): Promise<HomeCategoryCard[]> {
     },
     orderBy: { sortOrder: 'asc' },
   });
-  return rows.map((row: CategoryRow) => toCategoryCard(row));
+  return rows.map((row: CategoryRow) => toCategoryCard(row, lang));
+}
+
+/**
+ * Marketplace `POST /categories/list` read.
+ *
+ * Returns only active categories, in the stripped marketplace shape. `name`
+ * is picked from the row per `lang` (default `'ar'`). Sorted by `sortOrder`.
+ * No subcategories, no admin flags, no audit timestamps.
+ */
+export async function listMarketplaceCategories(
+  lang: Lang = 'ar',
+): Promise<MarketplaceCategoryCard[]> {
+  const rows = await prisma.category.findMany({
+    where: { isActive: true },
+    select: {
+      id: true,
+      name: true,
+      nameAr: true,
+      slug: true,
+      imageUrl: true,
+      sortOrder: true,
+    },
+    orderBy: { sortOrder: 'asc' },
+  });
+  return rows.map((row) => {
+    const stored = typeof row.imageUrl === 'string' ? row.imageUrl.trim() : '';
+    return {
+      id: row.id,
+      name: lang === 'ar' ? row.nameAr : row.name,
+      slug: row.slug,
+      imageUrl: stored.length > 0 ? stored : getCategoryImageUrl(row.slug),
+      sortOrder: row.sortOrder,
+    };
+  });
 }
 
 export async function getCategories(activeOnly = true, homeOnly = false) {

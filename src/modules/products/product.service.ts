@@ -5,6 +5,7 @@ import {
   AdjustStockInput,
   CreateProductInput,
   UpdateProductInput,
+  type Lang,
 } from './product.schema';
 import { isProductAvailable, type ProductWithStock } from './productAvailability';
 import {
@@ -12,6 +13,136 @@ import {
   type ProductRow,
 } from '../storefront/productCard.mapper';
 import type { ProductCard } from '../storefront/storefront.types';
+
+// ─── Marketplace localized product shape ────────────────────────────
+//
+// Returned by every `POST /api/products/*` endpoint. Every `nameAr` /
+// `descriptionAr` is dropped — both top-level and on nested `category` /
+// `subcategory` / `brand` — replaced by a single `name` picked per `lang`.
+
+export interface MarketplaceCategoryLite {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+export interface MarketplaceBrandLite {
+  id: string;
+  name: string;
+  slug: string;
+  imageUrl: string | null;
+}
+
+export interface MarketplaceProduct {
+  id: string;
+  name: string;
+  description: string | null;
+  sku: string | null;
+  barcode: string | null;
+  price: string | null;
+  stock: number;
+  reserved: number;
+  isActive: boolean;
+  isFeatured: boolean;
+  hideFromHome: boolean;
+  imageUrl: string | null;
+  categoryId: string;
+  subcategoryId: string | null;
+  brandId: string | null;
+  category: MarketplaceCategoryLite | null;
+  subcategory: MarketplaceCategoryLite | null;
+  brand: MarketplaceBrandLite | null;
+  createdAt: Date;
+  updatedAt: Date;
+  available: boolean;
+  offer: number;
+}
+
+export interface MarketplaceSuggestion {
+  id: string;
+  name: string;
+  sku: string | null;
+  imageUrl: string | null;
+  offer: number;
+}
+
+const pickName = (lang: Lang, en: string, ar: string) => (lang === 'ar' ? ar : en);
+const pickDescription = (
+  lang: Lang,
+  en: string | null | undefined,
+  ar: string | null | undefined,
+) => (lang === 'ar' ? ar ?? null : en ?? null);
+
+type ProductRelationRow = Prisma.ProductGetPayload<{
+  include: {
+    category: { select: { id: true; name: true; nameAr: true; slug: true } };
+    subcategory: { select: { id: true; name: true; nameAr: true; slug: true } };
+    brand: {
+      select: { id: true; name: true; nameAr: true; slug: true; imageUrl: true };
+    };
+  };
+}>;
+
+function normalizePrice(value: Prisma.Decimal | number | string | null): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number') return String(value);
+  return value.toString();
+}
+
+/**
+ * Map a Prisma product row (with nested category/subcategory/brand) into the
+ * public marketplace shape. `name` and `description` are localized per `lang`
+ * on the top-level product AND on every nested relation.
+ */
+export function toMarketplaceProduct(
+  row: ProductRelationRow,
+  lang: Lang,
+): MarketplaceProduct {
+  return {
+    id: row.id,
+    name: pickName(lang, row.name, row.nameAr),
+    description: pickDescription(lang, row.description, row.descriptionAr),
+    sku: row.sku,
+    barcode: row.barcode,
+    price: normalizePrice(row.price as Prisma.Decimal | number | string | null),
+    stock: row.stock,
+    reserved: row.reserved,
+    isActive: row.isActive,
+    isFeatured: row.isFeatured,
+    hideFromHome: row.hideFromHome,
+    imageUrl: row.imageUrl,
+    categoryId: row.categoryId,
+    subcategoryId: row.subcategoryId,
+    brandId: row.brandId,
+    category: row.category
+      ? {
+          id: row.category.id,
+          name: pickName(lang, row.category.name, row.category.nameAr),
+          slug: row.category.slug,
+        }
+      : null,
+    subcategory: row.subcategory
+      ? {
+          id: row.subcategory.id,
+          name: pickName(lang, row.subcategory.name, row.subcategory.nameAr),
+          slug: row.subcategory.slug,
+        }
+      : null,
+    brand: row.brand
+      ? {
+          id: row.brand.id,
+          name: pickName(lang, row.brand.name, row.brand.nameAr),
+          slug: row.brand.slug,
+          imageUrl: row.brand.imageUrl,
+        }
+      : null,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    available: isProductAvailable(row),
+    offer: 0,
+  };
+}
 
 /**
  * Standard paginated payload. Returns the new ninja-style fields
@@ -430,6 +561,121 @@ export async function searchSuggestions(q: string, limit = 8) {
     take: limit,
     orderBy: { isFeatured: 'desc' },
   });
+}
+
+// ─── Marketplace localized reads (POST /api/products/*) ────────────
+
+export interface MarketplaceListOptions extends ProductListOptions {
+  lang?: Lang;
+}
+
+/**
+ * Marketplace list. Same filtering as `listProducts` but returns the
+ * collapsed `MarketplaceProduct` shape (single localized `name` /
+ * `description`, nested relations also localized).
+ */
+export async function listMarketplaceProducts(opts: MarketplaceListOptions = {}) {
+  const { lang = 'ar', ...rest } = opts;
+  const result = await listProducts(rest);
+  return {
+    products: (result.products as unknown as ProductRelationRow[]).map((row) =>
+      toMarketplaceProduct(row, lang),
+    ),
+    pagination: result.pagination,
+  };
+}
+
+/**
+ * Marketplace detail. Returns the collapsed shape or `null` when missing.
+ */
+export async function getMarketplaceProduct(
+  id: string,
+  lang: Lang = 'ar',
+): Promise<MarketplaceProduct | null> {
+  const row = await prisma.product.findUnique({
+    where: { id },
+    include: PRODUCT_INCLUDE,
+  });
+  return row ? toMarketplaceProduct(row as unknown as ProductRelationRow, lang) : null;
+}
+
+/**
+ * Marketplace featured strip. Preserves the current
+ * `getFeaturedProducts()` filters + cap (`isActive`, `isFeatured`,
+ * `stock > 0`, `take: 20` by default).
+ */
+export async function listMarketplaceFeaturedProducts(
+  lang: Lang = 'ar',
+  limit = 20,
+): Promise<MarketplaceProduct[]> {
+  const rows = await prisma.product.findMany({
+    where: {
+      isActive: true,
+      isFeatured: true,
+      stock: { gt: 0 },
+    },
+    include: PRODUCT_INCLUDE,
+    take: limit,
+  });
+  return (rows as unknown as ProductRelationRow[]).map((row) =>
+    toMarketplaceProduct(row, lang),
+  );
+}
+
+/**
+ * Marketplace search. Preserves `searchProducts` semantics: barcode-exact
+ * fast-path, then full-text `contains` across name/nameAr/sku/barcode. The
+ * localized `name` is returned in `lang`; a search on Arabic input still
+ * matches Arabic content via `nameAr` regardless of the response language.
+ */
+export async function searchMarketplaceProducts(opts: {
+  q?: string;
+  barcode?: string;
+  page?: number;
+  limit?: number;
+  lang?: Lang;
+}) {
+  const { lang = 'ar', ...rest } = opts;
+  const result = await searchProducts(rest);
+  return {
+    products: (result.products as unknown as ProductRelationRow[]).map((row) =>
+      toMarketplaceProduct(row, lang),
+    ),
+    matchedProductId: result.matchedProductId,
+    pagination: result.pagination,
+  };
+}
+
+/**
+ * Marketplace typeahead. Returns minimal suggestion cards with a single
+ * localized `name`.
+ */
+export async function marketplaceSearchSuggestions(
+  q: string,
+  lang: Lang = 'ar',
+  limit = 8,
+): Promise<MarketplaceSuggestion[]> {
+  const term = q.trim();
+  if (!term) return [];
+  const rows = await prisma.product.findMany({
+    where: {
+      isActive: true,
+      OR: [
+        { name: { contains: term } },
+        { nameAr: { contains: term } },
+      ],
+    },
+    select: { id: true, name: true, nameAr: true, imageUrl: true, sku: true },
+    take: limit,
+    orderBy: { isFeatured: 'desc' },
+  });
+  return rows.map((row) => ({
+    id: row.id,
+    name: pickName(lang, row.name, row.nameAr),
+    sku: row.sku,
+    imageUrl: row.imageUrl,
+    offer: 0,
+  }));
 }
 
 // ─── Internal helpers ──────────────────────────────────────────────

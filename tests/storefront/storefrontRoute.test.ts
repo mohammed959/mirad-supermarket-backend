@@ -47,20 +47,42 @@ interface HttpResult {
   body: string;
 }
 
-function request(port: number, method: string, path: string): Promise<HttpResult> {
+function request(
+  port: number,
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<HttpResult> {
   return new Promise((resolve, reject) => {
-    const req = http.request({ host: '127.0.0.1', port, method, path }, (res) => {
-      const chunks: Buffer[] = [];
-      res.on('data', (c: Buffer) => chunks.push(c));
-      res.on('end', () =>
-        resolve({
-          status: res.statusCode ?? 0,
-          headers: res.headers,
-          body: Buffer.concat(chunks).toString('utf8'),
-        }),
-      );
-    });
+    const payload =
+      body === undefined ? undefined : Buffer.from(JSON.stringify(body), 'utf8');
+    const req = http.request(
+      {
+        host: '127.0.0.1',
+        port,
+        method,
+        path,
+        headers: payload
+          ? {
+              'content-type': 'application/json',
+              'content-length': String(payload.length),
+            }
+          : undefined,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () =>
+          resolve({
+            status: res.statusCode ?? 0,
+            headers: res.headers,
+            body: Buffer.concat(chunks).toString('utf8'),
+          }),
+        );
+      },
+    );
     req.on('error', reject);
+    if (payload) req.write(payload);
     req.end();
   });
 }
@@ -79,7 +101,7 @@ async function withServer(fn: (port: number) => Promise<void>): Promise<void> {
 // ── Fixture: minimal, deterministic HomeAggregate ────────────────────
 const aggregateFixture = () => ({
   categories: [
-    { id: 'c1', name: 'Dairy', nameAr: 'ألبان', slug: 'dairy', imageUrl: 'https://cdn/dairy.png', sortOrder: 1 },
+    { id: 'c1', name: 'ألبان', slug: 'dairy', imageUrl: 'https://cdn/dairy.png', sortOrder: 1, subCategories: [] },
   ],
   banners: [
     {
@@ -118,7 +140,7 @@ const aggregateFixture = () => ({
 // Tests
 // ─────────────────────────────────────────────────────────────────────
 
-test('GET /api/storefront/home returns 200 with the envelope + aggregate under data', async () => {
+test('POST /api/storefront/home returns 200 with the envelope + aggregate under data', async () => {
   const replaced: Replaced = [];
   let calls = 0;
   try {
@@ -127,7 +149,7 @@ test('GET /api/storefront/home returns 200 with the envelope + aggregate under d
       return Promise.resolve(aggregateFixture());
     });
     await withServer(async (port) => {
-      const res = await request(port, 'GET', '/api/storefront/home');
+      const res = await request(port, 'POST', '/api/storefront/home', { lang: 'ar' });
       assert.equal(res.status, 200);
       const body = JSON.parse(res.body) as { success: boolean; message: string; data: unknown };
       assert.equal(body.success, true);
@@ -163,7 +185,7 @@ test('response contains Cache-Control: no-cache', async () => {
   try {
     replace(replaced, storefrontSvc, 'getStorefrontHome', () => Promise.resolve(aggregateFixture()));
     await withServer(async (port) => {
-      const res = await request(port, 'GET', '/api/storefront/home');
+      const res = await request(port, 'POST', '/api/storefront/home', { lang: 'ar' });
       assert.equal(res.status, 200);
       assert.equal(res.headers['cache-control'], 'no-cache');
     });
@@ -177,7 +199,7 @@ test('no authentication is required — no Authorization header, still 200', asy
   try {
     replace(replaced, storefrontSvc, 'getStorefrontHome', () => Promise.resolve(aggregateFixture()));
     await withServer(async (port) => {
-      const res = await request(port, 'GET', '/api/storefront/home');
+      const res = await request(port, 'POST', '/api/storefront/home', { lang: 'ar' });
       assert.equal(res.status, 200);
       // The 401/403 envelopes both surface `success: false`; envelope success
       // must be true for a public endpoint on an unauthenticated request.
@@ -195,7 +217,7 @@ test('a service rejection reaches the global error middleware (500, success:fals
       Promise.reject(new Error('boom')),
     );
     await withServer(async (port) => {
-      const res = await request(port, 'GET', '/api/storefront/home');
+      const res = await request(port, 'POST', '/api/storefront/home', { lang: 'ar' });
       assert.equal(res.status, 500);
       const body = JSON.parse(res.body) as { success: boolean; message: string };
       assert.equal(body.success, false);
@@ -207,22 +229,79 @@ test('a service rejection reaches the global error middleware (500, success:fals
   }
 });
 
-test('effective URL is /api/storefront/home — no double prefix, no missing prefix', async () => {
+test('missing body defaults to lang="ar" and still returns 200', async () => {
+  const replaced: Replaced = [];
+  const observedLangs: unknown[] = [];
+  try {
+    replace(replaced, storefrontSvc, 'getStorefrontHome', (lang?: unknown) => {
+      observedLangs.push(lang);
+      return Promise.resolve(aggregateFixture());
+    });
+    await withServer(async (port) => {
+      const res = await request(port, 'POST', '/api/storefront/home');
+      assert.equal(res.status, 200);
+    });
+    assert.deepEqual(observedLangs, ['ar']);
+  } finally {
+    restoreAll(replaced);
+  }
+});
+
+test('invalid lang value falls back to "ar"', async () => {
+  const replaced: Replaced = [];
+  const observedLangs: unknown[] = [];
+  try {
+    replace(replaced, storefrontSvc, 'getStorefrontHome', (lang?: unknown) => {
+      observedLangs.push(lang);
+      return Promise.resolve(aggregateFixture());
+    });
+    await withServer(async (port) => {
+      const res = await request(port, 'POST', '/api/storefront/home', { lang: 'fr' });
+      assert.equal(res.status, 200);
+    });
+    assert.deepEqual(observedLangs, ['ar']);
+  } finally {
+    restoreAll(replaced);
+  }
+});
+
+test('lang="en" is forwarded verbatim to the service', async () => {
+  const replaced: Replaced = [];
+  const observedLangs: unknown[] = [];
+  try {
+    replace(replaced, storefrontSvc, 'getStorefrontHome', (lang?: unknown) => {
+      observedLangs.push(lang);
+      return Promise.resolve(aggregateFixture());
+    });
+    await withServer(async (port) => {
+      const res = await request(port, 'POST', '/api/storefront/home', { lang: 'en' });
+      assert.equal(res.status, 200);
+    });
+    assert.deepEqual(observedLangs, ['en']);
+  } finally {
+    restoreAll(replaced);
+  }
+});
+
+test('effective URL is /api/storefront/home — no double prefix, no missing prefix, no GET', async () => {
   const replaced: Replaced = [];
   try {
     replace(replaced, storefrontSvc, 'getStorefrontHome', () => Promise.resolve(aggregateFixture()));
     await withServer(async (port) => {
-      // The correct URL exists.
-      const ok = await request(port, 'GET', '/api/storefront/home');
+      // The correct URL + method exists.
+      const ok = await request(port, 'POST', '/api/storefront/home', { lang: 'ar' });
       assert.equal(ok.status, 200);
 
-      // Missing the /api prefix must 404 (Express falls through to the
-      // built-in 404 handler that returns { success:false, message:'Route not found' }).
-      const missingPrefix = await request(port, 'GET', '/storefront/home');
+      // GET on the same path must NOT match the POST route.
+      const wrongMethod = await request(port, 'GET', '/api/storefront/home');
+      assert.equal(wrongMethod.status, 404);
+
+      // Missing the /api prefix must 404.
+      const missingPrefix = await request(port, 'POST', '/storefront/home', { lang: 'ar' });
       assert.equal(missingPrefix.status, 404);
 
       // Doubled prefix must 404 too.
-      const doubledPrefix = await request(port, 'GET', '/api/api/storefront/home');
+      const doubledPrefix = await request(port, 'POST', '/api/api/storefront/home', { lang: 'ar' });
       assert.equal(doubledPrefix.status, 404);
     });
   } finally {
@@ -230,7 +309,7 @@ test('effective URL is /api/storefront/home — no double prefix, no missing pre
   }
 });
 
-test('route is registered exactly once (single 200 handler on GET)', async () => {
+test('route is registered exactly once (single 200 handler on POST)', async () => {
   const replaced: Replaced = [];
   let calls = 0;
   try {
@@ -239,14 +318,9 @@ test('route is registered exactly once (single 200 handler on GET)', async () =>
       return Promise.resolve(aggregateFixture());
     });
     await withServer(async (port) => {
-      const res = await request(port, 'GET', '/api/storefront/home');
+      const res = await request(port, 'POST', '/api/storefront/home', { lang: 'ar' });
       assert.equal(res.status, 200);
     });
-    // Duplicate registration would have caused a second call from the same request
-    // going through both handlers (Express runs all matching routes until one responds;
-    // duplicate `router.get` would still respond once, but the underlying service
-    // would only be called once because `res.headersSent` short-circuits). Instead,
-    // assert exact-once invocation as the observable guarantee.
     assert.equal(calls, 1);
   } finally {
     restoreAll(replaced);
@@ -271,7 +345,7 @@ test('controller does not touch any personal / gate service', async () => {
     replace(replaced, deliverySvc, 'getBranch', trip('delivery.getBranch'));
 
     await withServer(async (port) => {
-      const res = await request(port, 'GET', '/api/storefront/home');
+      const res = await request(port, 'POST', '/api/storefront/home', { lang: 'ar' });
       assert.equal(res.status, 200);
     });
     assert.deepEqual(forbidden, [], `controller called personal services: ${forbidden.join(', ')}`);
