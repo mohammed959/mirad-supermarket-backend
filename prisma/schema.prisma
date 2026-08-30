@@ -126,14 +126,15 @@ model User {
 
   otpCodes        OtpCode[]
   addresses       CustomerAddress[]
-  orders          Order[]                @relation("CustomerOrders")
-  pickedOrders    Order[]                @relation("PickerOrders")
-  drivenOrders    Order[]                @relation("DriverOrders")
+  orders          Order[]               @relation("CustomerOrders")
+  pickedOrders    Order[]               @relation("PickerOrders")
+  drivenOrders    Order[]               @relation("DriverOrders")
   subscription    CustomerSubscription?
   promotionUsages PromotionUsage[]
   notifications   Notification[]
   favorites       Favorite[]
   auditLogs       AuditLog[]
+  cart            Cart?
 
   @@index([mobile])
   @@index([email])
@@ -150,7 +151,7 @@ model OtpCode {
   usedAt    DateTime?
   createdAt DateTime  @default(now())
 
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@map("otp_codes")
@@ -171,8 +172,8 @@ model CustomerAddress {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  customer    User     @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  orders      Order[]
+  customer User    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  orders   Order[]
 
   @@index([customerId])
   @@map("customer_addresses")
@@ -181,14 +182,14 @@ model CustomerAddress {
 // ─── Branch ───────────────────────────────────────────────────────
 
 model Branch {
-  id        String   @id @default(cuid())
+  id        String  @id @default(cuid())
   name      String
   nameAr    String
   address   String
-  latitude  Decimal  @db.Decimal(10, 8)
-  longitude Decimal  @db.Decimal(11, 8)
+  latitude  Decimal @db.Decimal(10, 8)
+  longitude Decimal @db.Decimal(11, 8)
   phone     String?
-  isActive  Boolean  @default(true)
+  isActive  Boolean @default(true)
 
   // Polygon-based delivery + marketplace-access coverage. `deliveryAreas` is
   // an array of NAMED service areas — each entry is
@@ -212,18 +213,18 @@ model Branch {
 // ─── Categories & Products ────────────────────────────────────────
 
 model Category {
-  id            String        @id @default(cuid())
-  name          String
-  nameAr        String
-  slug          String        @unique
-  imageUrl      String?       @db.Text
-  sortOrder     Int           @default(0)
-  isActive      Boolean       @default(true)
+  id         String   @id @default(cuid())
+  name       String
+  nameAr     String
+  slug       String   @unique
+  imageUrl   String?  @db.Text
+  sortOrder  Int      @default(0)
+  isActive   Boolean  @default(true)
   // Home visibility. Independent of isActive: an active category can still be
   // hidden from the marketplace home while remaining listed in /categories.
-  showOnHome    Boolean       @default(true)
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  showOnHome Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   subcategories Subcategory[]
   products      Product[]
@@ -235,18 +236,18 @@ model Category {
 }
 
 model Subcategory {
-  id         String    @id @default(cuid())
+  id         String   @id @default(cuid())
   categoryId String
   name       String
   nameAr     String
-  slug       String    @unique
-  imageUrl   String?   @db.Text
-  sortOrder  Int       @default(0)
-  isActive   Boolean   @default(true)
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  slug       String   @unique
+  imageUrl   String?  @db.Text
+  sortOrder  Int      @default(0)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  category   Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  category   Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   products   Product[]
   promotions Promotion[] @relation("SubcategoryPromotions")
 
@@ -255,41 +256,42 @@ model Subcategory {
 }
 
 model Product {
-  id            String    @id @default(cuid())
+  id            String  @id @default(cuid())
   categoryId    String
   subcategoryId String?
   brandId       String?
   name          String
   nameAr        String
-  description   String?   @db.Text
-  descriptionAr String?   @db.Text
-  imageUrl      String?   @db.Text
+  description   String? @db.Text
+  descriptionAr String? @db.Text
+  imageUrl      String? @db.Text
 
   // Flattened product-level commerce fields (Phase 1). New products write
   // here directly; legacy products are backfilled from their canonical
   // variant by `prisma/backfill-products.ts`. `sku` is uniquely indexed
   // — MySQL permits multiple NULLs on a UNIQUE column so legacy rows are
   // tolerated until backfill runs.
-  sku           String?   @unique
-  barcode       String?
-  price         Decimal?  @db.Decimal(10, 2)
-  stock         Int       @default(0)
-  reserved      Int       @default(0)
+  sku      String?  @unique
+  barcode  String?
+  price    Decimal? @db.Decimal(10, 2)
+  stock    Int      @default(0)
+  reserved Int      @default(0)
 
-  isActive      Boolean   @default(true)
-  isFeatured    Boolean   @default(false)
-  hideFromHome  Boolean   @default(false)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  isActive     Boolean  @default(true)
+  isFeatured   Boolean  @default(false)
+  hideFromHome Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  category      Category      @relation(fields: [categoryId], references: [id])
-  subcategory   Subcategory?  @relation(fields: [subcategoryId], references: [id])
-  brand         Brand?        @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  category      Category              @relation(fields: [categoryId], references: [id])
+  subcategory   Subcategory?          @relation(fields: [subcategoryId], references: [id])
+  brand         Brand?                @relation(fields: [brandId], references: [id], onDelete: SetNull)
   variants      ProductVariant[]
   favorites     Favorite[]
-  promotions    Promotion[]   @relation("ProductPromotions")
+  promotions    Promotion[]           @relation("ProductPromotions")
   featuredItems FeaturedSectionItem[]
-  orderItems    OrderItem[]   @relation("ProductOrderItems")
+  orderItems    OrderItem[]           @relation("ProductOrderItems")
+  cartItems     CartItem[]
 
   @@index([categoryId])
   @@index([subcategoryId])
@@ -319,7 +321,7 @@ model Brand {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  products  Product[]
+  products Product[]
 
   @@index([isActive])
   @@map("brands")
@@ -351,39 +353,39 @@ model ProductVariant {
 // ─── Orders ───────────────────────────────────────────────────────
 
 model Order {
-  id              String        @id @default(cuid())
-  orderNumber     String        @unique
-  customerId      String
-  addressId       String?
-  pickerId        String?
-  driverId        String?
-  status          OrderStatus   @default(NEW)
-  fulfillmentType FulfillmentType @default(DELIVERY)
-  paymentMethod   PaymentMethod
-  paymentStatus   PaymentStatus @default(PENDING)
-  subtotal        Decimal       @db.Decimal(10, 2)
-  discountTotal   Decimal       @db.Decimal(10, 2) @default(0)
-  deliveryFee     Decimal       @db.Decimal(10, 2) @default(0)
-  total           Decimal       @db.Decimal(10, 2)
-  notes           String?       @db.Text
-  replacementPreference String? @db.Text
-  paymentProofUrl String?
-  deliveryLat     Decimal?      @db.Decimal(10, 8)
-  deliveryLng     Decimal?      @db.Decimal(11, 8)
-  distanceKm      Decimal?      @db.Decimal(8, 2)
+  id                    String          @id @default(cuid())
+  orderNumber           String          @unique
+  customerId            String
+  addressId             String?
+  pickerId              String?
+  driverId              String?
+  status                OrderStatus     @default(NEW)
+  fulfillmentType       FulfillmentType @default(DELIVERY)
+  paymentMethod         PaymentMethod
+  paymentStatus         PaymentStatus   @default(PENDING)
+  subtotal              Decimal         @db.Decimal(10, 2)
+  discountTotal         Decimal         @default(0) @db.Decimal(10, 2)
+  deliveryFee           Decimal         @default(0) @db.Decimal(10, 2)
+  total                 Decimal         @db.Decimal(10, 2)
+  notes                 String?         @db.Text
+  replacementPreference String?         @db.Text
+  paymentProofUrl       String?
+  deliveryLat           Decimal?        @db.Decimal(10, 8)
+  deliveryLng           Decimal?        @db.Decimal(11, 8)
+  distanceKm            Decimal?        @db.Decimal(8, 2)
   // Up to 3 customer-provided delivery-location photos (Bunny CDN URLs) so
   // the driver can find the exact spot. Stored as a JSON array of URL
   // strings — the images themselves live in Bunny, not the DB.
-  deliveryImages  Json?
-  subscriptionApplied Boolean   @default(false)
-  rejectionReason String?
+  deliveryImages        Json?
+  subscriptionApplied   Boolean         @default(false)
+  rejectionReason       String?
 
   // Scheduled pickup (Pickup-from-Branch reservations). Only meaningful when
   // fulfillmentType = PICKUP. ASAP orders leave these null.
-  pickupType               PickupType?     @default(ASAP)
+  pickupType               PickupType? @default(ASAP)
   scheduledPickupDate      DateTime?
-  scheduledPickupStartTime String?         // "HH:MM" snapshot
-  scheduledPickupEndTime   String?         // "HH:MM" snapshot
+  scheduledPickupStartTime String? // "HH:MM" snapshot
+  scheduledPickupEndTime   String? // "HH:MM" snapshot
   scheduledPickupSlotId    String?
 
   // Optional curbside-pickup details (Pickup-from-Branch only). Customer can
@@ -391,23 +393,23 @@ model Order {
   carPlateNumber     String?
   carBrand           String?
   carColor           String?
-  pickupCustomerNote String?  @db.Text
+  pickupCustomerNote String? @db.Text
 
   // Set when the assigned driver confirms "I have received the products".
   // Required before the driver can start the journey (OUT_FOR_DELIVERY).
   driverConfirmedAt DateTime?
-  deliveredAt     DateTime?
-  pickedUpAt      DateTime?
-  completedAt     DateTime?
-  confirmedAt     DateTime?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  deliveredAt       DateTime?
+  pickedUpAt        DateTime?
+  completedAt       DateTime?
+  confirmedAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  customer        User             @relation("CustomerOrders", fields: [customerId], references: [id])
-  picker          User?            @relation("PickerOrders", fields: [pickerId], references: [id])
-  driver          User?            @relation("DriverOrders", fields: [driverId], references: [id])
-  address         CustomerAddress? @relation(fields: [addressId], references: [id])
-  pickupSlot      PickupTimeSlot?  @relation(fields: [scheduledPickupSlotId], references: [id], onDelete: SetNull)
+  customer        User                 @relation("CustomerOrders", fields: [customerId], references: [id])
+  picker          User?                @relation("PickerOrders", fields: [pickerId], references: [id])
+  driver          User?                @relation("DriverOrders", fields: [driverId], references: [id])
+  address         CustomerAddress?     @relation(fields: [addressId], references: [id])
+  pickupSlot      PickupTimeSlot?      @relation(fields: [scheduledPickupSlotId], references: [id], onDelete: SetNull)
   items           OrderItem[]
   orderPromotions OrderPromotion[]
   statusHistory   OrderStatusHistory[]
@@ -444,15 +446,15 @@ model PickupSettings {
 model PickupTimeSlot {
   id        String   @id @default(cuid())
   label     String
-  startTime String   // "HH:MM"
-  endTime   String   // "HH:MM"
+  startTime String // "HH:MM"
+  endTime   String // "HH:MM"
   capacity  Int      @default(20)
   isActive  Boolean  @default(true)
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  orders    Order[]
+  orders Order[]
 
   @@index([isActive])
   @@map("pickup_time_slots")
@@ -499,7 +501,7 @@ model OrderStatusHistory {
   createdBy String?
   createdAt DateTime    @default(now())
 
-  order     Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId])
   @@map("order_status_history")
@@ -530,10 +532,10 @@ model Promotion {
   createdAt             DateTime      @default(now())
   updatedAt             DateTime      @updatedAt
 
-  targetProducts      Product[]        @relation("ProductPromotions")
-  targetVariants      ProductVariant[] @relation("VariantPromotions")
-  targetCategories    Category[]       @relation("CategoryPromotions")
-  targetSubcategories Subcategory[]    @relation("SubcategoryPromotions")
+  targetProducts      Product[]           @relation("ProductPromotions")
+  targetVariants      ProductVariant[]    @relation("VariantPromotions")
+  targetCategories    Category[]          @relation("CategoryPromotions")
+  targetSubcategories Subcategory[]       @relation("SubcategoryPromotions")
   usages              PromotionUsage[]
   orderPromotions     OrderPromotion[]
   auditLogs           PromotionAuditLog[]
@@ -544,44 +546,44 @@ model Promotion {
 }
 
 model PromotionUsage {
-  id            String    @id @default(cuid())
+  id            String   @id @default(cuid())
   promotionId   String
   customerId    String
   orderId       String
-  discountValue Decimal   @db.Decimal(10, 2)
-  usedAt        DateTime  @default(now())
+  discountValue Decimal  @db.Decimal(10, 2)
+  usedAt        DateTime @default(now())
 
-  promotion     Promotion @relation(fields: [promotionId], references: [id])
-  customer      User      @relation(fields: [customerId], references: [id])
+  promotion Promotion @relation(fields: [promotionId], references: [id])
+  customer  User      @relation(fields: [customerId], references: [id])
 
   @@index([promotionId, customerId])
   @@map("promotion_usages")
 }
 
 model OrderPromotion {
-  id            String    @id @default(cuid())
+  id            String  @id @default(cuid())
   orderId       String
   promotionId   String
   promotionName String
-  discountValue Decimal   @db.Decimal(10, 2)
+  discountValue Decimal @db.Decimal(10, 2)
   freeItems     Json?
 
-  order         Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  promotion     Promotion @relation(fields: [promotionId], references: [id])
+  order     Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  promotion Promotion @relation(fields: [promotionId], references: [id])
 
   @@index([orderId])
   @@map("order_promotions")
 }
 
 model PromotionAuditLog {
-  id          String    @id @default(cuid())
+  id          String   @id @default(cuid())
   promotionId String
   adminId     String
   action      String
   changes     Json?
-  createdAt   DateTime  @default(now())
+  createdAt   DateTime @default(now())
 
-  promotion   Promotion @relation(fields: [promotionId], references: [id])
+  promotion Promotion @relation(fields: [promotionId], references: [id])
 
   @@map("promotion_audit_logs")
 }
@@ -621,8 +623,8 @@ model CustomerSubscription {
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
 
-  customer         User             @relation(fields: [customerId], references: [id])
-  plan             SubscriptionPlan @relation(fields: [planId], references: [id])
+  customer User             @relation(fields: [customerId], references: [id])
+  plan     SubscriptionPlan @relation(fields: [planId], references: [id])
 
   @@index([customerId, status])
   @@map("customer_subscriptions")
@@ -647,7 +649,7 @@ model DeliveryPricingSettings {
   // Multiplier applied to the great-circle (haversine) distance to
   // approximate driving distance. 1.00 = use straight-line as-is.
   // Typical urban factors: 1.30–1.45. Caps to two decimals.
-  roadDistanceMultiplier     Decimal  @db.Decimal(4, 2) @default(1.00)
+  roadDistanceMultiplier     Decimal  @default(1.00) @db.Decimal(4, 2)
   updatedAt                  DateTime @updatedAt
 
   @@map("delivery_pricing_settings")
@@ -657,7 +659,7 @@ model DeliveryDistanceRule {
   id           String   @id @default(cuid())
   minKm        Decimal  @db.Decimal(6, 2)
   maxKm        Decimal? @db.Decimal(6, 2)
-  fee          Decimal  @db.Decimal(10, 2) @default(0)
+  fee          Decimal  @default(0) @db.Decimal(10, 2)
   outOfService Boolean  @default(false)
 
   // Optional percentage discount on the delivery fee, only applied when the
@@ -673,9 +675,9 @@ model DeliveryDistanceRule {
   basketThreshold   Decimal? @db.Decimal(10, 2)
   feeAboveThreshold Decimal? @db.Decimal(10, 2)
 
-  sortOrder    Int      @default(0)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([sortOrder])
   @@map("delivery_distance_rules")
@@ -731,8 +733,8 @@ model Notification {
   isRead    Boolean          @default(false)
   createdAt DateTime         @default(now())
 
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  order     Order?           @relation(fields: [orderId], references: [id])
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order Order? @relation(fields: [orderId], references: [id])
 
   @@index([userId, isRead])
   @@map("notifications")
@@ -749,7 +751,7 @@ model FeaturedSection {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  items     FeaturedSectionItem[]
+  items FeaturedSectionItem[]
 
   @@map("featured_sections")
 }
@@ -761,8 +763,8 @@ model FeaturedSectionItem {
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())
 
-  section   FeaturedSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
-  product   Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  section FeaturedSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  product Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@unique([sectionId, productId])
   @@index([sectionId])
@@ -782,7 +784,7 @@ model AuditLog {
   ipAddress  String?
   createdAt  DateTime @default(now())
 
-  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
 
   @@index([actorId])
   @@index([entityType, entityId])
@@ -799,9 +801,38 @@ model Favorite {
   productId  String
   createdAt  DateTime @default(now())
 
-  customer   User    @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  product    Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  customer User    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  product  Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@unique([customerId, productId])
   @@map("favorites")
+}
+
+// ─── Cart ─────────────────────────────────────────────────────────
+
+model Cart {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items CartItem[]
+
+  @@map("carts")
+}
+
+model CartItem {
+  id        String   @id @default(cuid())
+  cartId    String
+  productId String
+  quantity  Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cart    Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([cartId, productId])
+  @@map("cart_items")
 }
