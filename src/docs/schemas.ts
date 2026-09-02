@@ -501,6 +501,52 @@ export const schemas = {
     },
   },
 
+  // ── Cart ────────────────────────────────────────────────────────────
+  CartItem: {
+    type: 'object',
+    required: ['itemId', 'productId', 'name', 'sku', 'imageUrl', 'price', 'quantity', 'subtotal', 'available'],
+    properties: {
+      itemId: { type: 'string', description: 'Currently equal to `productId` — the cart is product-keyed.' },
+      productId: { type: 'string' },
+      name: { type: 'string', description: 'Localized per request `lang` (query param on GET, body field on POST; default `"ar"`).' },
+      sku: { type: 'string', nullable: true },
+      imageUrl: { type: 'string', nullable: true },
+      price: { type: 'number', example: 6.5 },
+      quantity: { type: 'integer', example: 2 },
+      subtotal: { type: 'number', example: 13, description: '`price * quantity`, rounded to 2 decimals.' },
+      available: { type: 'boolean', description: '`product.isActive && (stock - reserved) > 0` at read time.' },
+    },
+  },
+  CartItemRemoved: {
+    type: 'object',
+    required: ['itemId', 'productId', 'removed'],
+    description: 'Returned by `POST /cart/items` when a `decrement` brings the item\'s quantity to zero or below.',
+    properties: {
+      itemId: { type: 'string' },
+      productId: { type: 'string' },
+      removed: { type: 'boolean', example: true },
+    },
+  },
+  Cart: {
+    type: 'object',
+    required: ['userId', 'activeItemsCount', 'items'],
+    properties: {
+      userId: { type: 'string' },
+      activeItemsCount: { type: 'integer', example: 2, description: 'Number of distinct products currently in the cart.' },
+      items: { type: 'array', items: { $ref: '#/components/schemas/CartItem' } },
+    },
+  },
+  AddOrAdjustCartItemRequest: {
+    type: 'object',
+    required: ['productId', 'quantity', 'action'],
+    properties: {
+      productId: { type: 'string' },
+      quantity: { type: 'integer', minimum: 1, example: 1 },
+      action: { type: 'string', enum: ['increment', 'decrement'] },
+      lang: { type: 'string', enum: ['ar', 'en'], description: 'Optional; defaults to `"ar"`. Affects the localized `name` in the response.' },
+    },
+  },
+
   // ── Product / Brand ─────────────────────────────────────────────────
   Product: {
     type: 'object',

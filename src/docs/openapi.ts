@@ -30,6 +30,7 @@ import { subscriptionPaths } from './paths/subscriptions';
 import { notificationPaths } from './paths/notifications';
 import { addressPaths } from './paths/addresses';
 import { favoritePaths } from './paths/favorites';
+import { cartPaths } from './paths/cart';
 import { bannerPaths } from './paths/banners';
 import { featuredSectionPaths } from './paths/featuredSections';
 import { promotionPaths } from './paths/promotions';
@@ -68,7 +69,7 @@ const tags = [
   { name: 'Products', description: 'Storefront catalog + admin product management.' },
   { name: 'Categories', description: 'Category tree with subcategories.' },
   { name: 'Brands', description: 'Brand catalog.' },
-  { name: 'Cart', description: 'The cart is client-side; server-side surface is exposed via Checkout + Delivery.' },
+  { name: 'Cart', description: 'Customer-only persisted cart. Guests use a client-side basket instead — see `POST /cart/items` for details.' },
   { name: 'Wishlist', description: 'Alias for the Favorites tag — same underlying endpoints.' },
   { name: 'Favorites', description: 'Customer wishlist / favorites.' },
   { name: 'Orders', description: 'Order lifecycle from customer create → picker → driver → complete.' },
@@ -143,6 +144,7 @@ export const openapiSpec = {
     ...notificationPaths,
     ...addressPaths,
     ...favoritePaths,
+    ...cartPaths,
     ...bannerPaths,
     ...featuredSectionPaths,
     ...promotionPaths,
