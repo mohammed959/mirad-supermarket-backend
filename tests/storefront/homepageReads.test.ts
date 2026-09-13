@@ -285,13 +285,61 @@ test('listProductCardsForHome: correct where/orderBy/select/pagination + card-on
       'id',
       'imageUrl',
       'name',
-      'nameAr',
       'price',
       'sku',
     ]);
   }
   assert.equal(result.items[0].price, new Prisma.Decimal('6.50').toString());
   assert.equal(result.items[0].imageUrl, getProductImageUrl('ALM-MLK-1L'));
+  // Default lang="ar" — localized name comes from nameAr, not name.
+  assert.equal(result.items[0].name, 'حليب المراعي 1 لتر');
+});
+
+test('listProductCardsForHome: lang="en" picks English name from row.name', async () => {
+  const calls: Call[] = [];
+  const restoreFind = stub(calls, 'product', 'findMany', () => [productRow()]);
+  const restoreCount = stub(calls, 'product', 'count', () => 1);
+  let result;
+  try {
+    result = await listProductCardsForHome({ page: 1, limit: 20, lang: 'en' });
+  } finally {
+    restoreFind();
+    restoreCount();
+  }
+  assert.equal(result.items[0].name, 'Almarai Milk 1L');
+  assert.equal((result.items[0] as Record<string, unknown>).nameAr, undefined);
+});
+
+test('listProductCardsForHome: falls back to the other language when the requested one is blank', async () => {
+  const calls: Call[] = [];
+  const restoreFind = stub(calls, 'product', 'findMany', () => [
+    productRow({ nameAr: '' }),
+  ]);
+  const restoreCount = stub(calls, 'product', 'count', () => 1);
+  let result;
+  try {
+    result = await listProductCardsForHome({ page: 1, limit: 20, lang: 'ar' });
+  } finally {
+    restoreFind();
+    restoreCount();
+  }
+  // Requested lang="ar" but nameAr is blank — falls back to the English name.
+  assert.equal(result.items[0].name, 'Almarai Milk 1L');
+});
+
+test('listFeaturedProductCardsForHome: lang="en" picks English name and drops nameAr', async () => {
+  const calls: Call[] = [];
+  const restoreFind = stub(calls, 'product', 'findMany', () => [productRow()]);
+  const restoreCount = stub(calls, 'product', 'count', () => 999);
+  let result;
+  try {
+    result = await listFeaturedProductCardsForHome(20, 'en');
+  } finally {
+    restoreFind();
+    restoreCount();
+  }
+  assert.equal(result[0].name, 'Almarai Milk 1L');
+  assert.equal((result[0] as Record<string, unknown>).nameAr, undefined);
 });
 
 test('listProductCardsForHome: pagination math skips (page-1)*limit rows', async () => {
@@ -348,10 +396,11 @@ test('listFeaturedProductCardsForHome: matches getFeaturedProducts filters, NO o
     'id',
     'imageUrl',
     'name',
-    'nameAr',
     'price',
     'sku',
   ]);
+  // Default lang="ar" — localized name comes from nameAr, not name.
+  assert.equal(result[0].name, 'حليب المراعي 1 لتر');
 });
 
 // ── Featured sections (Approach B — variant-aware availability) ──────
@@ -569,11 +618,10 @@ test('listSectionsForHome: returned DTO contains NO stock, reserved, variants, o
       'id',
       'imageUrl',
       'name',
-      'nameAr',
       'price',
       'sku',
     ]);
-    for (const forbidden of ['stock', 'reserved', 'variants', 'category', 'subcategory', 'brand', 'description', 'isActive']) {
+    for (const forbidden of ['nameAr', 'stock', 'reserved', 'variants', 'category', 'subcategory', 'brand', 'description', 'isActive']) {
       assert.equal(
         (card as unknown as Record<string, unknown>)[forbidden],
         undefined,
@@ -581,6 +629,8 @@ test('listSectionsForHome: returned DTO contains NO stock, reserved, variants, o
       );
     }
   }
+  // Default lang="ar" — localized name comes from nameAr.
+  assert.equal(result[0].products[0].name, 'حليب المراعي 1 لتر');
   assert.deepEqual(Object.keys(result[0]).sort(), [
     'id',
     'name',

@@ -88,8 +88,8 @@ export async function getStorefrontHome(lang: Lang = 'ar'): Promise<HomeAggregat
     await Promise.all([
       categorySvc.getHomepageCategories(lang),
       bannerSvc.listBanners(true),
-      productSvc.listFeaturedProductCardsForHome(),
-      sectionSvc.listSectionsForHome(),
+      productSvc.listFeaturedProductCardsForHome(20, lang),
+      sectionSvc.listSectionsForHome(lang),
       settingsSvc.getHomeSettings(),
     ]);
 
@@ -102,6 +102,7 @@ export async function getStorefrontHome(lang: Lang = 'ar'): Promise<HomeAggregat
     page: 1,
     limit: allProductsLimit,
     excludeHiddenFromHome: true,
+    lang,
   });
 
   return {

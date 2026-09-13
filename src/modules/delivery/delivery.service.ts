@@ -11,6 +11,10 @@ import {
   findContainingArea,
   isPolygonInsidePolygon,
 } from '../../lib/geo';
+import type { Lang } from '../categories/category.schema';
+
+const pickName = (lang: Lang, en: string | null | undefined, ar: string | null | undefined) =>
+  (lang === 'ar' ? (ar || en) : (en || ar)) ?? null;
 
 function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371;
@@ -72,7 +76,6 @@ export interface DeliveryQuoteResult {
   /** Name of the coverage area (city) the customer's location falls inside,
    *  or null when outside all areas / no location supplied. */
   coverageAreaName: string | null;
-  coverageAreaNameAr: string | null;
   maxDeliveryKm: number | null;
   /** True when the customer is within the max delivery distance — subscription
    *  plans can only be offered/used when this is true. */
@@ -102,6 +105,9 @@ interface QuoteOpts {
   subscriptionBenefitType?: string | null;
   subscriptionDiscountValue?: number | null;
   subscriptionCappedFee?: number | null;
+  /** Localizes `coverageAreaName`. Defaults to `'ar'` — no caller currently
+   *  reads this field, so this default changes nothing for them. */
+  lang?: Lang;
 }
 
 /**
@@ -200,7 +206,6 @@ async function computeDeliveryQuote(opts: QuoteOpts): Promise<DeliveryQuoteResul
     hasActiveSubscription,
     availableFulfillmentTypes: ['PICKUP'],
     coverageAreaName: null,
-    coverageAreaNameAr: null,
   };
 
   if (!branch) {
@@ -291,8 +296,7 @@ async function computeDeliveryQuote(opts: QuoteOpts): Promise<DeliveryQuoteResul
 
   // Inside coverage ⇒ subscribable and deliverable; the fee is decided below.
   baseQuote.subscriptionEligible = true;
-  baseQuote.coverageAreaName = area.name;
-  baseQuote.coverageAreaNameAr = area.nameAr;
+  baseQuote.coverageAreaName = pickName(opts.lang ?? 'ar', area.name, area.nameAr);
 
   // SUBSCRIPTION PATH — bypass distance rules, apply the plan's benefit.
   if (hasActiveSubscription) {
@@ -451,7 +455,15 @@ export async function calculateDeliveryFee(opts: QuoteOpts) {
 
 // ─── Branch ────────────────────────────────────────────────────────
 
-export async function getBranch() {
+/**
+ * `GET /delivery/branch` is shared with the admin branch-coverage editor,
+ * which never sends `lang` and needs both `name`/`nameAr` (on the branch
+ * and on every delivery area) to prefill its bilingual form. Only when a
+ * caller (the marketplace) explicitly passes `lang` do we pick a single
+ * localized `name` and drop `nameAr` — the admin caller's shape is
+ * completely unaffected.
+ */
+export async function getBranch(lang?: Lang) {
   const branch = await prisma.branch.findFirst({ where: { isActive: true } });
   if (!branch) {
     return {
@@ -459,17 +471,20 @@ export async function getBranch() {
       branch: null,
     };
   }
+  const areas = normalizeAreas(branch.deliveryAreas);
   return {
     configured: true,
     branch: {
       id: branch.id,
-      name: branch.name,
-      nameAr: branch.nameAr,
+      name: lang ? pickName(lang, branch.name, branch.nameAr) : branch.name,
+      ...(lang ? {} : { nameAr: branch.nameAr }),
       address: branch.address,
       latitude: Number(branch.latitude),
       longitude: Number(branch.longitude),
       phone: branch.phone,
-      deliveryAreas: normalizeAreas(branch.deliveryAreas),
+      deliveryAreas: lang
+        ? areas.map(({ nameAr, ...area }) => ({ ...area, name: pickName(lang, area.name, nameAr) ?? area.name }))
+        : areas,
       excludedPolygons: normalizePolygons(branch.excludedPolygons),
     },
   };
@@ -492,10 +507,10 @@ export interface AreaInput {
  * excluded ring. When no areas are configured we report `configured: false`
  * so the frontend can fail open rather than lock every customer out.
  */
-export async function checkCoverage(lat: number, lng: number): Promise<{
+export async function checkCoverage(lat: number, lng: number, lang: Lang = 'ar'): Promise<{
   configured: boolean;
   covered: boolean;
-  area: { name: string; nameAr: string } | null;
+  area: { name: string } | null;
 }> {
   const branch = await prisma.branch.findFirst({ where: { isActive: true } });
   const areas = branch ? normalizeAreas(branch.deliveryAreas) : [];
@@ -511,7 +526,7 @@ export async function checkCoverage(lat: number, lng: number): Promise<{
   if (pointInAnyPolygon(point, excludedPolygons)) {
     return { configured: true, covered: false, area: null };
   }
-  return { configured: true, covered: true, area: { name: area.name, nameAr: area.nameAr } };
+  return { configured: true, covered: true, area: { name: pickName(lang, area.name, area.nameAr) ?? area.name } };
 }
 
 export interface UpsertBranchInput {

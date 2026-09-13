@@ -13,6 +13,16 @@ import { quoteDelivery, loadSubscriptionContext } from '../delivery/delivery.ser
 import { logAction } from '../audit/audit.service';
 import { getProductImageUrl } from '../../lib/productImage';
 import { assertSlotIsBookable } from '../pickup/pickup.service';
+import type { Lang } from '../categories/category.schema';
+
+const pickName = (lang: Lang, en: string | null | undefined, ar: string | null | undefined) =>
+  (lang === 'ar' ? (ar || en) : (en || ar)) ?? null;
+
+/** Localizes `name` (dropping `nameAr`) on a `{name, nameAr, ...}` product-like object. */
+function localizeProductLike<T extends { name: string; nameAr: string }>(obj: T, lang: Lang) {
+  const { nameAr, ...rest } = obj;
+  return { ...rest, name: pickName(lang, obj.name, nameAr) as string };
+}
 
 export async function createOrder(customerId: string, input: CreateOrderInput) {
   const fulfillmentType: FulfillmentType = input.fulfillmentType ?? 'DELIVERY';
@@ -341,7 +351,14 @@ export async function createOrder(customerId: string, input: CreateOrderInput) {
     },
   });
 
-  return order;
+  const lang: Lang = input.lang ?? 'ar';
+  return {
+    ...order,
+    items: order.items.map((item) => {
+      const { productNameAr, ...rest } = item;
+      return { ...rest, productName: pickName(lang, item.productName, productNameAr) ?? item.productName };
+    }),
+  };
 }
 
 // ─── Car pickup details (curbside) ───────────────────────────────────
@@ -564,7 +581,36 @@ function decorateOrder<T extends { items: any[] } | null>(order: T): T {
   return { ...order, items: order.items.map(decorateOrderItem) } as T;
 }
 
-export async function getOrderById(id: string) {
+/**
+ * `GET /orders/:id` is shared with staff (admin/picker/driver) UIs, which
+ * never send `lang` and rely on `productName`/`product.name` always being
+ * English plus a parallel `productNameAr`/`product.nameAr`. Only when a
+ * caller (the marketplace) explicitly passes `lang` do we pick a single
+ * localized `productName`/`product.name` and drop the `...Ar` variants —
+ * staff callers see today's unmodified bilingual shape.
+ */
+function localizeOrderForResponse<T extends { items: any[] } | null>(order: T, lang: Lang): T {
+  if (!order) return order;
+  return {
+    ...order,
+    items: order.items.map((item: any) => {
+      const { productNameAr, ...rest } = item;
+      return {
+        ...rest,
+        productName: pickName(lang, item.productName, productNameAr) ?? item.productName,
+        product: item.product ? localizeProductLike(item.product, lang) : item.product,
+        variant: item.variant
+          ? {
+              ...item.variant,
+              product: item.variant.product ? localizeProductLike(item.variant.product, lang) : item.variant.product,
+            }
+          : item.variant,
+      };
+    }),
+  } as T;
+}
+
+export async function getOrderById(id: string, lang?: Lang) {
   const order = await prisma.order.findUnique({
     where: { id },
     include: {
@@ -585,7 +631,8 @@ export async function getOrderById(id: string) {
       statusHistory: { orderBy: { createdAt: 'asc' } },
     },
   });
-  return decorateOrder(order);
+  const decorated = decorateOrder(order);
+  return lang ? localizeOrderForResponse(decorated, lang) : decorated;
 }
 
 export async function listOrders(opts: {
@@ -1238,7 +1285,7 @@ export async function resetOrderItemAction(
  * purchase. `suggestedVariantId` is gone — the customer cart is now
  * product-keyed.
  */
-export async function getBuyAgainProducts(customerId: string, limit = 20) {
+export async function getBuyAgainProducts(customerId: string, limit = 20, lang: Lang = 'ar') {
   const usageByProduct = new Map<string, { count: number; lastUsed: Date | null }>();
 
   // 1) Flat product rows
@@ -1313,7 +1360,15 @@ export async function getBuyAgainProducts(customerId: string, limit = 20) {
       return bl - al;
     })
     .slice(0, limit)
-    .map(({ product, orderCount }) => ({ product, orderCount }));
+    .map(({ product, orderCount }) => ({
+      product: {
+        ...localizeProductLike(product, lang),
+        category: product.category ? localizeProductLike(product.category, lang) : null,
+        subcategory: product.subcategory ? localizeProductLike(product.subcategory, lang) : null,
+        brand: product.brand ? localizeProductLike(product.brand, lang) : null,
+      },
+      orderCount,
+    }));
 
   return entries;
 }
@@ -1324,7 +1379,7 @@ export async function getBuyAgainProducts(customerId: string, limit = 20) {
  * for legacy variant rows via `variant.product`. The cart is product-keyed
  * end-to-end so the response no longer carries `variantId`/`variantType`.
  */
-export async function buildReorderCart(customerId: string, orderId: string) {
+export async function buildReorderCart(customerId: string, orderId: string, lang: Lang = 'ar') {
   const order = await prisma.order.findFirst({
     where: { id: orderId, customerId },
     include: {
@@ -1355,7 +1410,6 @@ export async function buildReorderCart(customerId: string, orderId: string) {
   const items: Array<{
     productId: string;
     productName: string;
-    productNameAr: string | null;
     productImage: string | null;
     price: number;
     quantity: number;
@@ -1393,8 +1447,7 @@ export async function buildReorderCart(customerId: string, orderId: string) {
     const originalPrice = Number(item.unitPrice);
     items.push({
       productId: product.id,
-      productName: product.name,
-      productNameAr: product.nameAr ?? null,
+      productName: pickName(lang, product.name, product.nameAr) ?? product.name,
       productImage: getProductImageUrl(product.sku ?? item.productSku),
       price: currentPrice,
       quantity: item.quantity,

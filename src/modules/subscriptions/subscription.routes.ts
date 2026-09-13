@@ -4,12 +4,20 @@ import { authenticateCustomer, authenticateStaff } from '../../middleware/auth.m
 import { ok, created, badRequest } from '../../lib/response';
 import * as svc from './subscription.service';
 import { AuthRequest } from '../../middleware/auth.middleware';
+import { parseLangQuery } from '../categories/category.schema';
 
 const router = Router();
 
-// Public
-router.get('/plans', asyncHandler(async (_req, res) => {
-  ok(res, await svc.getPlans());
+const pickPlanName = (lang: 'ar' | 'en', en: string, ar: string) => (lang === 'ar' ? (ar || en) : (en || ar));
+
+// Public. `svc.getPlans()` itself stays untouched (bilingual) — it's shared
+// with `GET /admin/plans` below, which never sends `lang` and needs both
+// `name`/`nameAr` for the admin plan table. This route localizes only its
+// own response, right before sending it.
+router.get('/plans', asyncHandler(async (req, res) => {
+  const lang = parseLangQuery(req.query.lang);
+  const plans = await svc.getPlans();
+  ok(res, plans.map(({ nameAr, ...plan }) => ({ ...plan, name: pickPlanName(lang, plan.name, nameAr) })));
 }));
 
 router.get('/eligibility', asyncHandler(async (req, res) => {
@@ -43,7 +51,7 @@ router.post('/subscribe', authenticateCustomer, asyncHandler(async (req: AuthReq
 }));
 
 router.get('/my', authenticateCustomer, asyncHandler(async (req: AuthRequest, res) => {
-  const sub = await svc.getActiveSubscription(req.user!.userId);
+  const sub = await svc.getActiveSubscription(req.user!.userId, parseLangQuery(req.query.lang));
   ok(res, sub);
 }));
 

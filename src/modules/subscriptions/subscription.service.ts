@@ -1,6 +1,7 @@
 import { prisma } from '../../lib/prisma';
 import { quoteDelivery } from '../delivery/delivery.service';
 import { logAction } from '../audit/audit.service';
+import type { Lang } from '../categories/category.schema';
 
 export interface SubscriptionEligibility {
   eligible: boolean;
@@ -191,8 +192,8 @@ export async function subscribeToPlan(
   return prisma.customerSubscription.create({ data: { ...data, customerId } });
 }
 
-export async function getActiveSubscription(customerId: string) {
-  return prisma.customerSubscription.findFirst({
+export async function getActiveSubscription(customerId: string, lang: Lang = 'ar') {
+  const sub = await prisma.customerSubscription.findFirst({
     where: {
       customerId,
       status: 'ACTIVE',
@@ -200,6 +201,9 @@ export async function getActiveSubscription(customerId: string) {
     },
     include: { plan: true },
   });
+  if (!sub) return sub;
+  const { nameAr, ...plan } = sub.plan;
+  return { ...sub, plan: { ...plan, name: lang === 'ar' ? (nameAr || plan.name) : (plan.name || nameAr) } };
 }
 
 export async function confirmSubscription(subscriptionId: string, adminId: string) {

@@ -753,6 +753,11 @@ export const schemas = {
     type: 'object',
     required: ['paymentMethod', 'items'],
     properties: {
+      lang: {
+        type: 'string',
+        enum: ['ar', 'en'],
+        description: 'Localizes each returned item\'s `productName` (drops `productNameAr`). Defaults to `"ar"`.',
+      },
       fulfillmentType: {
         $ref: '#/components/schemas/FulfillmentType',
       },
@@ -919,11 +924,10 @@ export const schemas = {
       },
       area: {
         nullable: true,
-        description: 'The matched city, or null when out of coverage.',
+        description: 'The matched city, or null when out of coverage. `name` is localized per the request `lang` (default `"ar"`); `nameAr` is not included on the wire.',
         type: 'object',
         properties: {
           name: { type: 'string', example: 'Riyadh Al Khabra' },
-          nameAr: { type: 'string', example: 'رياض الخبراء' },
         },
       },
     },
@@ -972,6 +976,11 @@ export const schemas = {
       customerLng: { type: 'number', nullable: true, example: 44.068 },
       cartSubtotal: { type: 'number', example: 200 },
       fulfillmentType: { $ref: '#/components/schemas/FulfillmentType' },
+      lang: {
+        type: 'string',
+        enum: ['ar', 'en'],
+        description: 'Localizes the internal `coverageAreaName` computation. Defaults to `"ar"`.',
+      },
     },
   },
   DeliveryQuoteResponse: {
@@ -1324,6 +1333,40 @@ export const schemas = {
     },
   },
 
+  StorefrontLocalizedProductCard: {
+    type: 'object',
+    required: ['id', 'name', 'sku', 'imageUrl', 'price', 'available'],
+    description:
+      'Same as `StorefrontProductCard`, but `name` is a SINGLE string localized per the request-body `lang` (`ar` uses `nameAr`, `en` uses `name`; falls back to whichever is populated if the requested translation is blank). `nameAr` is not included on the wire. Used only for `featuredProducts` and `allProducts.items` — `featuredSections[].products` keeps the bilingual `StorefrontProductCard` shape.',
+    properties: {
+      id: { type: 'string', example: 'clw7prod1' },
+      name: {
+        type: 'string',
+        description: 'Localized per request-body `lang` (default `"ar"`).',
+        example: 'حليب المراعي كامل الدسم 1 لتر',
+      },
+      sku: { type: 'string', nullable: true, example: 'ALM-MLK-1L' },
+      imageUrl: {
+        type: 'string',
+        description:
+          'Product image URL derived server-side from `sku` via the CDN convention `${BUNNY_CDN_BASE_URL}/{sku}.{ext}`. Blank/null SKUs fall back to the configured default product image; the frontend swaps to the default on `<img onError>`.',
+        example: 'https://cdn.example.net/products/ALM-MLK-1L.png',
+      },
+      price: {
+        type: 'string',
+        nullable: true,
+        description:
+          'Decimal string matching the wire format produced when Prisma Decimal is serialized via Express (e.g. `"6.5"`, `"12.75"`). `null` for legacy products whose `price` column is unset.',
+        example: '6.5',
+      },
+      available: {
+        type: 'boolean',
+        description: '`product.isActive && (product.stock - product.reserved) > 0`.',
+        example: true,
+      },
+    },
+  },
+
   StorefrontHomeRequest: {
     type: 'object',
     description:
@@ -1442,7 +1485,7 @@ export const schemas = {
         type: 'array',
         description:
           'First page of all-products cards. Size is capped by the admin-configured `HomeSettings.allProductsLimit` (default 20, max 100).',
-        items: { $ref: '#/components/schemas/StorefrontProductCard' },
+        items: { $ref: '#/components/schemas/StorefrontLocalizedProductCard' },
       },
       hasMore: {
         type: 'boolean',
@@ -1472,7 +1515,7 @@ export const schemas = {
       },
       featuredProducts: {
         type: 'array',
-        items: { $ref: '#/components/schemas/StorefrontProductCard' },
+        items: { $ref: '#/components/schemas/StorefrontLocalizedProductCard' },
       },
       featuredSections: {
         type: 'array',

@@ -5,6 +5,16 @@ export const subscriptionPaths = {
     get: {
       tags: ['Subscriptions'],
       summary: 'List active subscription plans (public)',
+      description: 'Each plan\'s `name` is localized per `?lang` (default `"ar"`); `nameAr` is not included on the wire. (The schema below shows the full admin shape — the underlying data source is shared with `GET /subscriptions/admin/plans`, which still returns both `name` and `nameAr`.)',
+      parameters: [
+        {
+          in: 'query',
+          name: 'lang',
+          required: false,
+          schema: { type: 'string', enum: ['ar', 'en'] },
+          description: 'Defaults to `"ar"`.',
+        },
+      ],
       responses: {
         '200': success({
           type: 'array',
@@ -63,7 +73,17 @@ export const subscriptionPaths = {
     get: {
       tags: ['Subscriptions'],
       summary: 'Get the current customer\'s active subscription (customer)',
+      description: 'The nested `plan.name` is localized per `?lang` (default `"ar"`); `plan.nameAr` is not included on the wire.',
       security: bearerAuth,
+      parameters: [
+        {
+          in: 'query',
+          name: 'lang',
+          required: false,
+          schema: { type: 'string', enum: ['ar', 'en'] },
+          description: 'Defaults to `"ar"`.',
+        },
+      ],
       responses: {
         '200': success({
           oneOf: [{ $ref: '#/components/schemas/CustomerSubscription' }, { type: 'null' }],

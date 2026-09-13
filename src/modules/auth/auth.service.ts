@@ -114,7 +114,7 @@ export async function staffLogin(
   };
 }
 
-export async function getMe(userId: string) {
+export async function getMe(userId: string, lang: 'ar' | 'en' = 'ar') {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: {
@@ -138,5 +138,6 @@ export async function getMe(userId: string) {
     },
   });
   if (!user) throw new Error('User not found');
-  return user;
+  const { nameAr, ...rest } = user;
+  return { ...rest, name: lang === 'ar' ? (nameAr || user.name) : (user.name || nameAr) };
 }

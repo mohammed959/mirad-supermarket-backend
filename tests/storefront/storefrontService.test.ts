@@ -224,6 +224,7 @@ test('all-products read uses page size derived from Home Settings.allProductsLim
       page: 1,
       limit: 33,
       excludeHiddenFromHome: true,
+      lang: 'ar',
     });
   } finally {
     restoreAll(replaced);

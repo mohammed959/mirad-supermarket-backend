@@ -135,8 +135,19 @@ export const orderPaths = {
         'Ordering: `orderCount` DESC, then most-recent purchase DESC. Products that are no longer active or currently out of stock are excluded. Capped at 20 entries.',
         '',
         'Requires a **customer** JWT (staff tokens are rejected by the `authenticateCustomer` middleware).',
+        '',
+        'Each product\'s `name` (and its category/subcategory/brand `name`) is localized per `?lang` (default `"ar"`); `nameAr` is not included on the wire.',
       ].join('\n'),
       security: bearerAuth,
+      parameters: [
+        {
+          in: 'query',
+          name: 'lang',
+          required: false,
+          schema: { type: 'string', enum: ['ar', 'en'] },
+          description: 'Defaults to `"ar"`.',
+        },
+      ],
       responses: {
         '200': success(
           {
@@ -152,7 +163,6 @@ export const orderPaths = {
                 product: {
                   id: 'clw7prod1',
                   name: 'Almarai Full Cream Milk 1L',
-                  nameAr: 'حليب المراعي كامل الدسم ١ لتر',
                   sku: 'ALM-MLK-1L',
                   price: 6.5,
                   stock: 120,
@@ -161,7 +171,7 @@ export const orderPaths = {
                   isFeatured: false,
                   hideFromHome: false,
                   imageUrl: 'https://mirad-market.b-cdn.net/products/ALM-MLK-1L.png',
-                  category: { id: 'clw7cat1', name: 'Dairy & Eggs', nameAr: 'الألبان والبيض' },
+                  category: { id: 'clw7cat1', name: 'Dairy & Eggs' },
                   subcategory: null,
                   brand: null,
                 },
@@ -179,8 +189,19 @@ export const orderPaths = {
     get: {
       tags: ['Orders'],
       summary: 'Get one order by id (customer or staff)',
+      description:
+        'Without `lang`, item `productName`/`product.name` keep today\'s bilingual shape (both the English and `...Ar` fields) — this is what admin/picker/driver UIs rely on. When `lang` (`ar`|`en`) is passed, each item\'s `productName` (and nested `product`/`variant.product` `name`) is localized instead, and the `...Ar` fields are dropped.',
       security: bearerAuth,
-      parameters: [orderIdParam],
+      parameters: [
+        orderIdParam,
+        {
+          in: 'query',
+          name: 'lang',
+          required: false,
+          schema: { type: 'string', enum: ['ar', 'en'] },
+          description: 'Opts into the marketplace-localized item shape. Omit to get today\'s bilingual shape.',
+        },
+      ],
       responses: {
         '200': success({ $ref: '#/components/schemas/Order' }),
         '403': errorResponses['403'],
@@ -193,8 +214,20 @@ export const orderPaths = {
     post: {
       tags: ['Orders'],
       summary: 'Reorder — re-add this order\'s items to the customer\'s cart',
+      description: 'Each returned item\'s `productName` is localized per the body `lang` (default `"ar"`); `productNameAr` is not included on the wire.',
       security: bearerAuth,
       parameters: [orderIdParam],
+      requestBody: {
+        required: false,
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              properties: { lang: { type: 'string', enum: ['ar', 'en'] } },
+            },
+          },
+        },
+      },
       responses: {
         '200': success({
           type: 'object',

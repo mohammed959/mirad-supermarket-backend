@@ -3,7 +3,7 @@ import * as svc from './category.service';
 import { ok, created, noContent, notFound } from '../../lib/response';
 import { importCategoriesFromExcel, buildCategoryTemplate } from './category.import';
 import { AuthRequest } from '../../middleware/auth.middleware';
-import { parseLang } from './category.schema';
+import { parseLang, parseLangQuery } from './category.schema';
 
 /**
  * Admin list: `GET /api/categories/admin` (staff only).
@@ -38,7 +38,8 @@ export async function listMarketplace(req: Request, res: Response): Promise<void
 }
 
 export async function getOne(req: Request, res: Response): Promise<void> {
-  const data = await svc.getCategoryById(req.params.id);
+  const lang = parseLangQuery(req.query.lang);
+  const data = await svc.getCategoryById(req.params.id, lang);
   if (!data) { notFound(res); return; }
   ok(res, data);
 }

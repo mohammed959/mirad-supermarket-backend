@@ -1,6 +1,9 @@
 import { z } from 'zod';
 
 export const createOrderSchema = z.object({
+  // Localizes `productName` on each returned item (drops `productNameAr`).
+  // Missing/invalid falls back to `'ar'`, matching every other endpoint.
+  lang: z.enum(['ar', 'en']).optional(),
   fulfillmentType: z.enum(['DELIVERY', 'PICKUP']).default('DELIVERY'),
   addressId: z.string().optional(),
   paymentMethod: z.enum(['CASH_ON_DELIVERY', 'BANK_TRANSFER', 'PAY_AT_BRANCH']),

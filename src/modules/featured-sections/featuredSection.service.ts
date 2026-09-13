@@ -1,6 +1,6 @@
 import { prisma } from '../../lib/prisma';
 import {
-  toProductCard,
+  toLocalizedProductCard,
   type ProductRow,
 } from '../storefront/productCard.mapper';
 import {
@@ -9,8 +9,9 @@ import {
 } from '../products/productAvailability';
 import type {
   HomeFeaturedSection,
-  ProductCard,
+  LocalizedProductCard,
 } from '../storefront/storefront.types';
+import type { Lang } from '../categories/category.schema';
 
 /**
  * Storefront-home optimised featured-section read.
@@ -37,7 +38,7 @@ import type {
  *     with `stock === 0` still pass the pre-filter and go through the
  *     variant check.
  */
-export async function listSectionsForHome(): Promise<HomeFeaturedSection[]> {
+export async function listSectionsForHome(lang: Lang = 'ar'): Promise<HomeFeaturedSection[]> {
   const sections = await prisma.featuredSection.findMany({
     where: { isActive: true },
     orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }],
@@ -78,12 +79,12 @@ export async function listSectionsForHome(): Promise<HomeFeaturedSection[]> {
 
   const dto: HomeFeaturedSection[] = [];
   for (const section of sections) {
-    const products: ProductCard[] = [];
+    const products: LocalizedProductCard[] = [];
     for (const item of section.items) {
       const raw = item.product as unknown as ProductWithVariants & ProductRow;
       const available = isProductAvailableConsideringVariants(raw);
       if (!available) continue;
-      products.push(toProductCard(raw, available));
+      products.push(toLocalizedProductCard(raw, lang, available));
     }
     if (products.length === 0) continue;
     dto.push({

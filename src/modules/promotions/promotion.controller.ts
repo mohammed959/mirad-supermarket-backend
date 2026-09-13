@@ -3,6 +3,7 @@ import { AuthRequest } from '../../middleware/auth.middleware';
 import * as svc from './promotion.service';
 import { ok, created, notFound, badRequest } from '../../lib/response';
 import { PromotionType } from '@prisma/client';
+import { parseLangQuery } from '../categories/category.schema';
 
 function qs(val: unknown): string | undefined {
   return typeof val === 'string' ? val : undefined;
@@ -57,6 +58,6 @@ export async function archive(req: AuthRequest, res: Response): Promise<void> {
 }
 
 export async function forProduct(req: AuthRequest, res: Response): Promise<void> {
-  const data = await svc.getActivePromotionsForProduct(req.params.productId);
+  const data = await svc.getActivePromotionsForProduct(req.params.productId, parseLangQuery(req.query.lang));
   ok(res, data);
 }

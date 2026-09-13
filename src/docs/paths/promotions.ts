@@ -7,9 +7,16 @@ export const promotionPaths = {
     get: {
       tags: ['Promotions'],
       summary: 'Promotions that currently apply to a product (public)',
-      description: 'Used by product cards to render "3 for the price of 2" style callouts.',
+      description: 'Used by product cards to render "3 for the price of 2" style callouts. `name` is localized per `?lang` (default `"ar"`); `nameAr` is not included on the wire.',
       parameters: [
         { in: 'path', name: 'productId', required: true, schema: { type: 'string' } },
+        {
+          in: 'query',
+          name: 'lang',
+          required: false,
+          schema: { type: 'string', enum: ['ar', 'en'] },
+          description: 'Defaults to `"ar"`.',
+        },
       ],
       responses: {
         '200': success({

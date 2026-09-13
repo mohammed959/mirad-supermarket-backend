@@ -141,7 +141,18 @@ export const categoryPaths = {
     get: {
       tags: ['Categories'],
       summary: 'Get one category with its subcategories (public)',
-      parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string' } }],
+      description:
+        'Without `lang`, returns the full bilingual shape (`name` + `nameAr`, same on each subcategory) — this is what the admin product-list page relies on. When `lang` (`ar`|`en`) is passed, the response instead carries a single localized `name` on the category and each subcategory, and drops `nameAr` — this is what the marketplace uses.',
+      parameters: [
+        { in: 'path', name: 'id', required: true, schema: { type: 'string' } },
+        {
+          in: 'query',
+          name: 'lang',
+          required: false,
+          schema: { type: 'string', enum: ['ar', 'en'] },
+          description: 'Opts into the marketplace-localized response shape (single `name`, no `nameAr`). Omit to get today\'s bilingual shape.',
+        },
+      ],
       responses: {
         '200': success({ $ref: '#/components/schemas/Category' }),
         '404': errorResponses['404'],

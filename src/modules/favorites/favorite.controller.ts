@@ -2,9 +2,11 @@ import { Response } from 'express';
 import { AuthRequest } from '../../middleware/auth.middleware';
 import * as svc from './favorite.service';
 import { ok, created, noContent, badRequest } from '../../lib/response';
+import { parseLangQuery } from '../categories/category.schema';
 
 export async function list(req: AuthRequest, res: Response): Promise<void> {
-  const data = await svc.listFavorites(req.user!.userId);
+  const lang = parseLangQuery(req.query.lang);
+  const data = await svc.listFavorites(req.user!.userId, lang);
   ok(res, data);
 }
 

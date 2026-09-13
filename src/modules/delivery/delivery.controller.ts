@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { AuthRequest } from '../../middleware/auth.middleware';
 import * as svc from './delivery.service';
 import { ok, badRequest } from '../../lib/response';
+import { parseLang, parseOptionalLangQuery } from '../categories/category.schema';
 
 /**
  * Phase 3: both `calculateFee` and `quote` delegate to the same
@@ -25,6 +26,7 @@ export async function calculateFee(req: AuthRequest, res: Response): Promise<voi
     customerLng,
     cartSubtotal,
     fulfillmentType,
+    lang: parseLang(req.body),
     ...sub,
   });
   ok(res, result);
@@ -43,13 +45,14 @@ export async function quote(req: AuthRequest, res: Response): Promise<void> {
     customerLng,
     cartSubtotal,
     fulfillmentType,
+    lang: parseLang(req.body),
     ...sub,
   });
   ok(res, result);
 }
 
-export async function getBranch(_req: AuthRequest, res: Response): Promise<void> {
-  const data = await svc.getBranch();
+export async function getBranch(req: AuthRequest, res: Response): Promise<void> {
+  const data = await svc.getBranch(parseOptionalLangQuery(req.query.lang));
   ok(res, data);
 }
 
@@ -92,7 +95,7 @@ const coverageCheckSchema = z.object({
 export async function checkCoverage(req: AuthRequest, res: Response): Promise<void> {
   try {
     const { lat, lng } = coverageCheckSchema.parse(req.body);
-    const result = await svc.checkCoverage(lat, lng);
+    const result = await svc.checkCoverage(lat, lng, parseLang(req.body));
     ok(res, result);
   } catch (err) {
     badRequest(res, (err as Error).message);

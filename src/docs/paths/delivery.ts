@@ -65,7 +65,7 @@ export const deliveryPaths = {
             data: {
               configured: true,
               covered: true,
-              area: { name: 'Riyadh Al Khabra', nameAr: 'رياض الخبراء' },
+              area: { name: 'Riyadh Al Khabra' },
             },
           },
         ),
@@ -79,7 +79,16 @@ export const deliveryPaths = {
       tags: ['Delivery', 'Branches'],
       summary: 'Get the configured delivery branch + coverage areas (public)',
       description:
-        'Returns `{ configured, branch }`. `branch` is null (and `configured` false) until an admin sets one up. `branch.deliveryAreas` are the named service polygons the marketplace uses to gate access client-side.',
+        'Returns `{ configured, branch }`. `branch` is null (and `configured` false) until an admin sets one up. `branch.deliveryAreas` are the named service polygons the marketplace uses to gate access client-side.\n\nWithout `lang`, `branch.name`/`nameAr` and each delivery area\'s `name`/`nameAr` keep today\'s bilingual shape — this is what the admin branch-coverage editor relies on. When `lang` (`ar`|`en`) is passed, `name` is localized instead and `nameAr` is dropped, on the branch and on every delivery area.',
+      parameters: [
+        {
+          in: 'query',
+          name: 'lang',
+          required: false,
+          schema: { type: 'string', enum: ['ar', 'en'] },
+          description: 'Opts into the marketplace-localized shape. Omit to get today\'s bilingual shape.',
+        },
+      ],
       responses: {
         '200': success({ $ref: '#/components/schemas/BranchEnvelope' }),
       },

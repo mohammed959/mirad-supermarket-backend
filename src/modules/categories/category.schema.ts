@@ -19,3 +19,22 @@ export function parseLang(body: unknown): Lang {
   if (!parsed.success) return 'ar';
   return parsed.data.lang ?? 'ar';
 }
+
+/**
+ * `?lang=` query-string counterpart to `parseLang`, for GET endpoints.
+ * Same fallback rule: missing / invalid value falls back to `'ar'`.
+ */
+export function parseLangQuery(value: unknown): Lang {
+  return value === 'ar' || value === 'en' ? value : 'ar';
+}
+
+/**
+ * Same as `parseLangQuery`, but returns `undefined` instead of defaulting
+ * to `'ar'` when absent/invalid. For endpoints shared with a non-marketplace
+ * caller (e.g. admin) that never sends `lang` and must keep receiving
+ * today's unmodified bilingual shape — only an explicit, valid `lang`
+ * opts a request into the localized response.
+ */
+export function parseOptionalLangQuery(value: unknown): Lang | undefined {
+  return value === 'ar' || value === 'en' ? value : undefined;
+}

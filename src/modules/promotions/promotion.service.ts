@@ -1,6 +1,7 @@
 import { Prisma, PromotionType, TargetScope } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { logAction } from '../audit/audit.service';
+import type { Lang } from '../categories/category.schema';
 
 export interface PromotionInput {
   name: string;
@@ -346,7 +347,7 @@ function promotionMatchesItem(
 }
 
 // Customer-facing helper: which active promotions apply to a single product?
-export async function getActivePromotionsForProduct(productId: string) {
+export async function getActivePromotionsForProduct(productId: string, lang: Lang = 'ar') {
   const product = await prisma.product.findUnique({
     where: { id: productId },
     select: { id: true, categoryId: true, subcategoryId: true, variants: { select: { id: true } } },
@@ -356,7 +357,7 @@ export async function getActivePromotionsForProduct(productId: string) {
   const now = new Date();
   const variantIds = product.variants.map((v) => v.id);
 
-  return prisma.promotion.findMany({
+  const promotions = await prisma.promotion.findMany({
     where: {
       isActive: true,
       archivedAt: null,
@@ -379,4 +380,8 @@ export async function getActivePromotionsForProduct(productId: string) {
       id: true, name: true, nameAr: true, type: true, config: true,
     },
   });
+  return promotions.map(({ nameAr, ...promo }) => ({
+    ...promo,
+    name: lang === 'ar' ? (nameAr || promo.name) : (promo.name || nameAr),
+  }));
 }

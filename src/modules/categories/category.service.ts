@@ -120,11 +120,30 @@ export async function getCategories(activeOnly = true, homeOnly = false) {
   });
 }
 
-export async function getCategoryById(id: string) {
-  return prisma.category.findUnique({
+/**
+ * Marketplace `GET /categories/:id` read. `name` is picked from `lang`
+ * (default `'ar'`, falling back to whichever of `name`/`nameAr` is
+ * populated) on both the category and each subcategory; `nameAr` is
+ * dropped from the wire.
+ */
+export async function getCategoryById(id: string, lang: Lang = 'ar') {
+  const category = await prisma.category.findUnique({
     where: { id },
     include: { subcategories: { orderBy: { sortOrder: 'asc' } } },
   });
+  if (!category) return null;
+  const { nameAr, subcategories, ...rest } = category;
+  return {
+    ...rest,
+    name: lang === 'ar' ? (nameAr || category.name) : (category.name || nameAr),
+    subcategories: subcategories.map((s) => {
+      const { nameAr: subNameAr, ...subRest } = s;
+      return {
+        ...subRest,
+        name: lang === 'ar' ? (subNameAr || s.name) : (s.name || subNameAr),
+      };
+    }),
+  };
 }
 
 export async function createCategory(data: {

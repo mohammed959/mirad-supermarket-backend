@@ -95,8 +95,17 @@ export const authPaths = {
       tags: ['Authentication', 'Profile'],
       summary: 'Get the currently authenticated user',
       description:
-        'Accepts either a customer or a staff bearer token. Response shape is the same either way.',
+        'Accepts either a customer or a staff bearer token. Response shape is the same either way. `name` is localized per `?lang` (default `"ar"`); `nameAr` is not included on the wire.',
       security: bearerAuth,
+      parameters: [
+        {
+          in: 'query',
+          name: 'lang',
+          required: false,
+          schema: { type: 'string', enum: ['ar', 'en'] },
+          description: 'Defaults to `"ar"`.',
+        },
+      ],
       responses: {
         '200': success({ $ref: '#/components/schemas/Customer' }),
         '401': errorResponses['401'],

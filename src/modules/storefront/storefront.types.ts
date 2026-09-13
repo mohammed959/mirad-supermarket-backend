@@ -64,16 +64,32 @@ export interface ProductCard {
   available: boolean;
 }
 
+/**
+ * Same shape as `ProductCard`, but `name` is a SINGLE string localized per
+ * the request-body `lang` (default `'ar'`) — `nameAr` is intentionally
+ * dropped from the wire. Used only for `featuredProducts` and
+ * `allProducts.items` on the home aggregate; `featuredSections[].products`
+ * keeps the bilingual `ProductCard` shape unchanged.
+ */
+export interface LocalizedProductCard {
+  id: string;
+  name: string;
+  sku: string | null;
+  imageUrl: string;
+  price: string | null;
+  available: boolean;
+}
+
 export interface HomeFeaturedSection {
   id: string;
   name: string;
   nameAr: string;
   sortOrder: number;
-  products: ProductCard[];
+  products: LocalizedProductCard[];
 }
 
 export interface HomeAllProducts {
-  items: ProductCard[];
+  items: LocalizedProductCard[];
   /** `true` when the server has more all-products rows than the response includes. */
   hasMore: boolean;
 }
@@ -81,7 +97,7 @@ export interface HomeAllProducts {
 export interface HomeAggregate {
   categories: HomeCategoryCard[];
   banners: HomeBanner[];
-  featuredProducts: ProductCard[];
+  featuredProducts: LocalizedProductCard[];
   featuredSections: HomeFeaturedSection[];
   allProducts: HomeAllProducts;
 }

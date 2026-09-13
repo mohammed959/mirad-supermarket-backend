@@ -28,8 +28,10 @@ import type {
   HomeCategoryCard,
   HomeFeaturedSection,
   HomeSubcategoryCard,
+  LocalizedProductCard,
   ProductCard,
 } from './storefront.types';
+import type { Lang } from '../categories/category.schema';
 
 // ── Loose row shapes ─────────────────────────────────────────────────
 // Kept intentionally narrow so mapper callers can pass any Prisma
@@ -121,6 +123,31 @@ export function toProductCard(row: ProductRow, available?: boolean): ProductCard
     id: row.id,
     name: row.name,
     nameAr: row.nameAr,
+    sku: row.sku,
+    imageUrl: getProductImageUrl(row.sku),
+    price: normalizePrice(row.price),
+    available: typeof available === 'boolean' ? available : isProductAvailable(row),
+  };
+}
+
+/**
+ * Same mapping as `toProductCard`, but `name` is picked per `lang` instead
+ * of returning both `name` and `nameAr`. Falls back to whichever of the two
+ * is actually populated if the requested translation is blank.
+ *
+ * Used only for the home aggregate's `featuredProducts` and
+ * `allProducts.items` — `toProductCard` (bilingual) stays the shape for
+ * everything else (e.g. featured-section products).
+ */
+export function toLocalizedProductCard(
+  row: ProductRow,
+  lang: Lang,
+  available?: boolean,
+): LocalizedProductCard {
+  const name = lang === 'ar' ? (row.nameAr || row.name) : (row.name || row.nameAr);
+  return {
+    id: row.id,
+    name,
     sku: row.sku,
     imageUrl: getProductImageUrl(row.sku),
     price: normalizePrice(row.price),

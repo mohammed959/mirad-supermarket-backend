@@ -3,6 +3,7 @@ import { AuthRequest } from '../../middleware/auth.middleware';
 import * as authService from './auth.service';
 import { ok, created, badRequest, unauthorized } from '../../lib/response';
 import { requestOtpSchema, verifyOtpSchema, staffLoginSchema } from './auth.schema';
+import { parseLangQuery } from '../categories/category.schema';
 
 export async function requestOtp(req: AuthRequest, res: Response): Promise<void> {
   const { mobile } = requestOtpSchema.parse(req.body);
@@ -31,6 +32,6 @@ export async function staffLogin(req: AuthRequest, res: Response): Promise<void>
 }
 
 export async function getMe(req: AuthRequest, res: Response): Promise<void> {
-  const user = await authService.getMe(req.user!.userId);
+  const user = await authService.getMe(req.user!.userId, parseLangQuery(req.query.lang));
   ok(res, user);
 }

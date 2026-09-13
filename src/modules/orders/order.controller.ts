@@ -8,6 +8,7 @@ import {
   rejectOrderSchema,
   updateStatusSchema,
 } from './order.schema';
+import { parseOptionalLangQuery, parseLangQuery, parseLang } from '../categories/category.schema';
 import { ok, created, notFound, badRequest } from '../../lib/response';
 import { OrderStatus, FulfillmentType } from '@prisma/client';
 
@@ -26,7 +27,7 @@ export async function create(req: AuthRequest, res: Response): Promise<void> {
 }
 
 export async function getOne(req: AuthRequest, res: Response): Promise<void> {
-  const order = await svc.getOrderById(req.params.id);
+  const order = await svc.getOrderById(req.params.id, parseOptionalLangQuery(req.query.lang));
   if (!order) { notFound(res, 'Order not found'); return; }
 
   // Ownership / scope enforcement. Treat unauthorised reads as 404 so that
@@ -268,7 +269,7 @@ export async function dashboardStats(req: AuthRequest, res: Response): Promise<v
 }
 
 export async function buyAgain(req: AuthRequest, res: Response): Promise<void> {
-  const data = await svc.getBuyAgainProducts(req.user!.userId);
+  const data = await svc.getBuyAgainProducts(req.user!.userId, 20, parseLangQuery(req.query.lang));
   ok(res, data);
 }
 
@@ -324,7 +325,7 @@ export async function clearCarPickupDetails(req: AuthRequest, res: Response): Pr
 
 export async function reorder(req: AuthRequest, res: Response): Promise<void> {
   try {
-    const data = await svc.buildReorderCart(req.user!.userId, req.params.id);
+    const data = await svc.buildReorderCart(req.user!.userId, req.params.id, parseLang(req.body));
     ok(res, data);
   } catch (err) {
     badRequest(res, (err as Error).message);

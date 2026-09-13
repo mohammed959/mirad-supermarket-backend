@@ -11,6 +11,7 @@ import {
   searchSuggestionsBodySchema,
   parseLang,
 } from './product.schema';
+import { parseOptionalLangQuery } from '../categories/category.schema';
 import { ok, created, noContent, notFound, badRequest } from '../../lib/response';
 
 function qs(val: unknown): string | undefined {
@@ -32,6 +33,7 @@ export async function list(req: Request, res: Response): Promise<void> {
     includeOutOfStock: req.query.includeOutOfStock === 'true',
     includeInactive: req.query.all === 'true',
     excludeHiddenFromHome: req.query.excludeHiddenFromHome === 'true',
+    lang: parseOptionalLangQuery(req.query.lang),
   });
   ok(res, result);
 }

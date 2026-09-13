@@ -1,6 +1,40 @@
 import { prisma } from '../../lib/prisma';
+import type { Lang } from '../categories/category.schema';
 
-export async function listFavorites(customerId: string) {
+const pickName = (lang: Lang, en: string, ar: string) =>
+  lang === 'ar' ? (ar || en) : (en || ar);
+
+/** Localizes `name` on a `{name, nameAr, ...}` object, dropping `nameAr`. */
+function localizeNamed<T extends { name: string; nameAr: string }>(
+  obj: T,
+  lang: Lang,
+): Omit<T, 'nameAr'> & { name: string } {
+  const { nameAr, ...rest } = obj;
+  return { ...rest, name: pickName(lang, obj.name, nameAr) };
+}
+
+/**
+ * Localizes `name` (dropping `nameAr`) on the product and its
+ * category/subcategory, per `lang` (default `'ar'`). Every other field
+ * (description, descriptionAr, variants, sku, price, stock, ...) is left
+ * untouched.
+ */
+function localizeFavoriteProduct<
+  T extends {
+    name: string;
+    nameAr: string;
+    category: { name: string; nameAr: string } | null;
+    subcategory: { name: string; nameAr: string } | null;
+  },
+>(product: T, lang: Lang) {
+  return {
+    ...localizeNamed(product, lang),
+    category: product.category ? localizeNamed(product.category, lang) : null,
+    subcategory: product.subcategory ? localizeNamed(product.subcategory, lang) : null,
+  };
+}
+
+export async function listFavorites(customerId: string, lang: Lang = 'ar') {
   const favs = await prisma.favorite.findMany({
     where: { customerId },
     include: {
@@ -17,7 +51,7 @@ export async function listFavorites(customerId: string) {
   return favs.map((f) => ({
     favoriteId: f.id,
     createdAt: f.createdAt,
-    product: f.product,
+    product: localizeFavoriteProduct(f.product, lang),
   }));
 }
 

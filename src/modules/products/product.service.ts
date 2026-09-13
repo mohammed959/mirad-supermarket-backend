@@ -9,10 +9,10 @@ import {
 } from './product.schema';
 import { isProductAvailable, type ProductWithStock } from './productAvailability';
 import {
-  toProductCard,
+  toLocalizedProductCard,
   type ProductRow,
 } from '../storefront/productCard.mapper';
-import type { ProductCard } from '../storefront/storefront.types';
+import type { LocalizedProductCard } from '../storefront/storefront.types';
 
 // ─── Marketplace localized product shape ────────────────────────────
 //
@@ -66,7 +66,7 @@ export interface MarketplaceSuggestion {
   offer: number;
 }
 
-const pickName = (lang: Lang, en: string, ar: string) => (lang === 'ar' ? ar : en);
+const pickName = (lang: Lang, en: string, ar: string) => (lang === 'ar' ? (ar || en) : (en || ar));
 const pickDescription = (
   lang: Lang,
   en: string | null | undefined,
@@ -185,6 +185,39 @@ export interface ProductListOptions {
   includeOutOfStock?: boolean;
   includeInactive?: boolean;
   excludeHiddenFromHome?: boolean;
+  /**
+   * This endpoint is shared with the admin product table, which relies on
+   * getting both `name` and `nameAr` back and never sends this option.
+   * Only when a caller (the marketplace) explicitly passes `lang` do we
+   * pick a single localized `name` and drop `nameAr` — on the product
+   * itself and on its `category`/`subcategory`/`brand`. Every other field
+   * is unaffected either way.
+   */
+  lang?: Lang;
+}
+
+/** Localizes `name` (dropping `nameAr`) on a product and its category/subcategory/brand. */
+function localizeProductNames<
+  T extends {
+    name: string;
+    nameAr: string;
+    category?: { name: string; nameAr: string } | null;
+    subcategory?: { name: string; nameAr: string } | null;
+    brand?: { name: string; nameAr: string } | null;
+  },
+>(product: T, lang: Lang) {
+  const { nameAr, category, subcategory, brand, ...rest } = product;
+  const localize = <C extends { name: string; nameAr: string }>(c: C) => {
+    const { nameAr: cNameAr, ...cRest } = c;
+    return { ...cRest, name: pickName(lang, c.name, cNameAr) };
+  };
+  return {
+    ...rest,
+    name: pickName(lang, product.name, nameAr),
+    ...(category !== undefined && { category: category ? localize(category) : null }),
+    ...(subcategory !== undefined && { subcategory: subcategory ? localize(subcategory) : null }),
+    ...(brand !== undefined && { brand: brand ? localize(brand) : null }),
+  };
 }
 
 /**
@@ -207,6 +240,7 @@ export async function listProducts(opts: ProductListOptions = {}) {
     includeOutOfStock = false,
     includeInactive = false,
     excludeHiddenFromHome = false,
+    lang,
   } = opts;
 
   // Explicit id lookups (e.g. the cart) must return the requested products
@@ -247,8 +281,9 @@ export async function listProducts(opts: ProductListOptions = {}) {
     prisma.product.count({ where }),
   ]);
 
+  const annotated = products.map(annotateAvailability);
   return {
-    products: products.map(annotateAvailability),
+    products: lang ? annotated.map((p) => localizeProductNames(p, lang)) : annotated,
     pagination: buildPagination(page, limit, total),
   };
 }
@@ -372,19 +407,21 @@ export async function getFeaturedProducts() {
  * compute `hasMore = total > items.length`.
  *
  * Uses a narrow `select` — no relations, no description, no audit fields.
- * Rows are mapped through the Step 1 `toProductCard`; availability comes
+ * Rows are mapped through `toLocalizedProductCard`; availability comes
  * from the shared `isProductAvailable` predicate.
  */
 export interface HomeProductCardsOptions {
   page?: number;
   limit?: number;
   excludeHiddenFromHome?: boolean;
+  /** Localizes each card's `name`; defaults to `'ar'`. */
+  lang?: Lang;
 }
 
 export async function listProductCardsForHome(
   opts: HomeProductCardsOptions = {},
-): Promise<{ items: ProductCard[]; total: number }> {
-  const { page = 1, limit = 20, excludeHiddenFromHome = false } = opts;
+): Promise<{ items: LocalizedProductCard[]; total: number }> {
+  const { page = 1, limit = 20, excludeHiddenFromHome = false, lang = 'ar' } = opts;
 
   const where: Prisma.ProductWhereInput = {
     isActive: true,
@@ -413,7 +450,7 @@ export async function listProductCardsForHome(
   ]);
 
   return {
-    items: (rows as unknown as ProductRow[]).map((row) => toProductCard(row)),
+    items: (rows as unknown as ProductRow[]).map((row) => toLocalizedProductCard(row, lang)),
     total,
   };
 }
@@ -431,7 +468,8 @@ export async function listProductCardsForHome(
  */
 export async function listFeaturedProductCardsForHome(
   limit = 20,
-): Promise<ProductCard[]> {
+  lang: Lang = 'ar',
+): Promise<LocalizedProductCard[]> {
   const rows = await prisma.product.findMany({
     where: {
       isActive: true,
@@ -450,7 +488,7 @@ export async function listFeaturedProductCardsForHome(
     },
     take: limit,
   });
-  return (rows as unknown as ProductRow[]).map((row) => toProductCard(row));
+  return (rows as unknown as ProductRow[]).map((row) => toLocalizedProductCard(row, lang));
 }
 
 // ─── Smart search ──────────────────────────────────────────────────

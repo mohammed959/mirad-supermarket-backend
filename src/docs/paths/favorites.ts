@@ -5,7 +5,17 @@ export const favoritePaths = {
     get: {
       tags: ['Favorites'],
       summary: 'List the current customer\'s favorite products',
+      description: 'Each product\'s `name` (and its category/subcategory `name`) is localized per `?lang` (default `"ar"`); `nameAr` is not included on the wire.',
       security: bearerAuth,
+      parameters: [
+        {
+          in: 'query',
+          name: 'lang',
+          required: false,
+          schema: { type: 'string', enum: ['ar', 'en'] },
+          description: 'Defaults to `"ar"`.',
+        },
+      ],
       responses: {
         '200': success({
           type: 'array',

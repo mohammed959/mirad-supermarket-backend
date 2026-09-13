@@ -6,13 +6,14 @@ export const productPaths = {
       tags: ['Products'],
       summary: 'List / search products (public, paginated)',
       description:
-        'Supports filtering by `categoryId`, `subcategoryId`, `brandId`, `search`, `isActive`, `isFeatured`. Sort with `sort` = `newest | priceAsc | priceDesc | popular`.',
+        'Supports filtering by `categoryId`, `subcategoryId`, `brandId`, `search`, `isActive`, `isFeatured`. Sort with `sort` = `newest | priceAsc | priceDesc | popular`.\n\nAlso used by the marketplace cart to resolve current product names via `?ids=`. Without `lang`, `name`/`nameAr` (and the same on `category`/`subcategory`/`brand`) keep today\'s bilingual shape — this is what the admin product table relies on. When `lang` (`ar`|`en`) is passed, `name` is localized instead and `nameAr` is dropped, everywhere it appears.',
       parameters: [
         ...paginationQueryParams,
         { in: 'query', name: 'categoryId', schema: { type: 'string' } },
         { in: 'query', name: 'subcategoryId', schema: { type: 'string' } },
         { in: 'query', name: 'brandId', schema: { type: 'string' } },
         { in: 'query', name: 'search', schema: { type: 'string' } },
+        { in: 'query', name: 'ids', schema: { type: 'string' }, description: 'Comma-separated product ids.' },
         {
           in: 'query',
           name: 'sort',
@@ -22,6 +23,13 @@ export const productPaths = {
           },
         },
         { in: 'query', name: 'isFeatured', schema: { type: 'boolean' } },
+        {
+          in: 'query',
+          name: 'lang',
+          required: false,
+          schema: { type: 'string', enum: ['ar', 'en'] },
+          description: 'Opts into the marketplace-localized shape. Omit to get today\'s bilingual shape.',
+        },
       ],
       responses: {
         '200': success({
