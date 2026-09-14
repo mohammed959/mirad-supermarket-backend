@@ -85,7 +85,7 @@ export async function importExcel(req: AuthRequest, res: Response): Promise<void
     ok(
       res,
       summary,
-      `Imported ${summary.categoriesCreated + summary.categoriesUpdated} category(ies) and ${summary.subcategoriesCreated + summary.subcategoriesUpdated} subcategory(ies).`,
+      `${summary.successfulRows} row(s) imported, ${summary.failedRows} failed. ${summary.categoriesCreated} category(ies) created, ${summary.categoriesReused} reused, ${summary.subcategoriesCreated} subcategory(ies) created.`,
     );
   } catch (err) {
     res.status(400).json({ success: false, message: (err as Error).message });
