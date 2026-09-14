@@ -123,7 +123,7 @@ export async function importExcel(req: AuthRequest, res: Response): Promise<void
   }
   try {
     const summary = await importProductsFromExcel(file.buffer, req.user!.userId);
-    ok(res, summary, `Imported ${summary.productsCreated} product(s)`);
+    ok(res, summary, `${summary.productsCreated} product(s) created, ${summary.productsUpdated} updated, ${summary.failedRows} row(s) failed.`);
   } catch (err) {
     res.status(400).json({ success: false, message: (err as Error).message });
   }

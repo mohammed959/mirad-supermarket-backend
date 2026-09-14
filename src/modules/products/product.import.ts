@@ -12,6 +12,17 @@ import { logAction } from '../audit/audit.service';
  *
  * Header aliases below let operators paste from a variety of
  * spreadsheets while still mapping to a single canonical field.
+ *
+ * Create vs. update: the SKU (normalized the same way for both paths —
+ * trimmed) is looked up against the catalog. No match creates a new
+ * product exactly as before. A match UPDATES that product instead —
+ * `name`, `nameAr`, `brandSlug`, `categorySlug`, `subcategorySlug`,
+ * `description`, `descriptionAr`, `price`, `quantity` (replaces the stock
+ * value, never additive), `barcode`, and `featured` are all taken from the
+ * row, exactly as a fresh create would. The SKU itself is only ever used to
+ * find the product — it's never written to on update. Both paths share the
+ * same field validation, run before any database write, so an invalid row
+ * neither creates nor partially updates anything.
  */
 // IMPORTANT: every key here MUST be already normalized (lowercase, no
 // spaces or underscores). `normalizeHeader` strips those before the
@@ -73,6 +84,8 @@ export interface ImportRowError {
 export interface ImportSummary {
   totalRows: number;
   productsCreated: number;
+  productsUpdated: number;
+  failedRows: number;
   errors: ImportRowError[];
 }
 
@@ -200,13 +213,17 @@ export async function importProductsFromExcel(buffer: Buffer, actorId: string): 
     else subsByCategory.set(s.categoryId, [s]);
   }
 
-  // SKU conflict check across the file + DB.
+  // SKU lookup across the file + DB. A SKU already in the catalog switches
+  // that row from create to update — `existingProductBySku` maps the
+  // normalized SKU to the product id to update.
   const fileSkus = rows.map((r) => r.sku?.trim()).filter((s): s is string => Boolean(s));
   const existingSkuRows = await prisma.product.findMany({
     where: { sku: { in: fileSkus } },
-    select: { sku: true },
+    select: { id: true, sku: true },
   });
-  const existingSkus = new Set(existingSkuRows.map((r) => r.sku).filter(Boolean) as string[]);
+  const existingProductBySku = new Map(
+    existingSkuRows.filter((r) => r.sku).map((r) => [r.sku as string, r.id]),
+  );
 
   // Detect SKUs that appear more than once within the uploaded file so
   // operators see a clear "duplicated in the file" error instead of a
@@ -216,7 +233,20 @@ export async function importProductsFromExcel(buffer: Buffer, actorId: string): 
     skuCountInFile.set(sku, (skuCountInFile.get(sku) ?? 0) + 1);
   }
 
+  // Barcode ownership — bulk-loaded so a row can be rejected when its
+  // barcode already belongs to a DIFFERENT product than the one this row
+  // would create/update. Updated as rows are processed so two rows in the
+  // same file introducing the same brand-new barcode are also caught.
+  const fileBarcodes = rows.map((r) => r.barcode?.trim()).filter((b): b is string => Boolean(b));
+  const existingBarcodeRows = fileBarcodes.length
+    ? await prisma.product.findMany({ where: { barcode: { in: fileBarcodes } }, select: { id: true, barcode: true } })
+    : [];
+  const productIdByBarcode = new Map<string, string>(
+    existingBarcodeRows.filter((r) => r.barcode).map((r) => [r.barcode as string, r.id]),
+  );
+
   let productsCreated = 0;
+  let productsUpdated = 0;
 
   for (const row of rows) {
     // Names — both required
@@ -281,7 +311,8 @@ export async function importProductsFromExcel(buffer: Buffer, actorId: string): 
       subId = sub.id;
     }
 
-    // SKU — required, unique in the file AND in the database
+    // SKU — required, and must be unique WITHIN the file (an existing SKU
+    // in the database is not an error — see below, it means "update").
     if (!row.sku) {
       errors.push({ rowNumber: row.rowNumber, field: 'sku', message: 'SKU is required' });
       continue;
@@ -295,9 +326,24 @@ export async function importProductsFromExcel(buffer: Buffer, actorId: string): 
       });
       continue;
     }
-    if (existingSkus.has(sku)) {
-      errors.push({ rowNumber: row.rowNumber, field: 'sku', message: `SKU "${sku}" already exists in the catalog.` });
-      continue;
+    // Existing SKU ⇒ this row updates that product instead of creating a
+    // new one. The SKU itself is only ever used to find it — never changed.
+    const existingProductId = existingProductBySku.get(sku);
+
+    // Barcode — optional, but when provided it must not already belong to
+    // a DIFFERENT product (the product this row is about to create, or the
+    // one it's about to update, doesn't count as "another product").
+    const barcode = row.barcode?.trim() || null;
+    if (barcode) {
+      const ownerId = productIdByBarcode.get(barcode);
+      if (ownerId && ownerId !== existingProductId) {
+        errors.push({
+          rowNumber: row.rowNumber,
+          field: 'barcode',
+          message: `Barcode "${barcode}" already belongs to another product.`,
+        });
+        continue;
+      }
     }
 
     // Price — required, > 0
@@ -306,49 +352,59 @@ export async function importProductsFromExcel(buffer: Buffer, actorId: string): 
       continue;
     }
 
-    // Quantity — required, integer >= 0
+    // Quantity — required, integer >= 0. On update this REPLACES the
+    // current stock value; it is never added to it.
     if (row.quantity == null || row.quantity < 0) {
       errors.push({ rowNumber: row.rowNumber, field: 'quantity', message: 'Quantity must be 0 or greater' });
       continue;
     }
 
+    // Flat product: no variants array is passed. Description/subcategory/
+    // brand/barcode are explicitly nulled when the cell is blank so an
+    // update fully replaces them from the row, matching how a create
+    // treats the same blank columns.
+    const data = {
+      name: row.name.trim(),
+      nameAr: row.nameAr.trim(),
+      description: row.description?.trim() ?? null,
+      descriptionAr: row.descriptionAr?.trim() ?? null,
+      isFeatured: Boolean(row.featured),
+      categoryId: cat.id,
+      subcategoryId: subId,
+      brandId,
+      barcode,
+      price: row.price,
+      stock: Math.floor(row.quantity),
+    };
+
     try {
-      // Flat product: no variants array is passed. The product is
-      // created with product-level price/stock/sku/barcode and a brand
-      // FK. Description/subcategory remain undefined when not supplied,
-      // so the optional columns stay truly optional.
-      await prisma.product.create({
-        data: {
-          name: row.name.trim(),
-          nameAr: row.nameAr.trim(),
-          description: row.description?.trim(),
-          descriptionAr: row.descriptionAr?.trim(),
-          isFeatured: Boolean(row.featured),
-          categoryId: cat.id,
-          subcategoryId: subId,
-          brandId,
-          sku,
-          // Fully optional — empty stays null (no validation, non-unique).
-          barcode: row.barcode?.trim() || null,
-          price: row.price,
-          stock: Math.floor(row.quantity),
-        },
-      });
-      existingSkus.add(sku);
-      productsCreated += 1;
+      let productId = existingProductId;
+      if (productId) {
+        // SKU is deliberately omitted — it's the lookup key, never updated.
+        await prisma.product.update({ where: { id: productId }, data });
+        productsUpdated += 1;
+      } else {
+        const createdProduct = await prisma.product.create({ data: { ...data, sku } });
+        productId = createdProduct.id;
+        existingProductBySku.set(sku, productId);
+        productsCreated += 1;
+      }
+      if (barcode) productIdByBarcode.set(barcode, productId);
     } catch (err) {
       errors.push({ rowNumber: row.rowNumber, message: `Database error: ${(err as Error).message}` });
     }
   }
 
+  const failedRows = errors.length;
+
   await logAction({
     actorId, actorRole: 'SUPER_ADMIN',
     action: 'product.import',
     entityType: 'product_import',
-    changes: { totalRows: rows.length, productsCreated, errorCount: errors.length },
+    changes: { totalRows: rows.length, productsCreated, productsUpdated, failedRows },
   });
 
-  return { totalRows: rows.length, productsCreated, errors };
+  return { totalRows: rows.length, productsCreated, productsUpdated, failedRows, errors };
 }
 
 export async function buildSampleTemplate(): Promise<Buffer> {
