@@ -231,6 +231,20 @@ async function main() {
     });
   }
 
+  // Subtotal-based delivery pricing (replaces distance-based fee — see
+  // deliverySubtotalPricing.service.ts). Suggested default configuration.
+  const existingSubtotalPricing = await prisma.deliverySubtotalPricingSettings.findFirst();
+  if (!existingSubtotalPricing) {
+    await prisma.deliverySubtotalPricingSettings.create({ data: { freeDeliveryThreshold: 150 } });
+    await prisma.deliverySubtotalRange.createMany({
+      data: [
+        { minSubtotal: 0, maxSubtotal: 50, deliveryFee: 15, sortOrder: 0 },
+        { minSubtotal: 50, maxSubtotal: 100, deliveryFee: 10, sortOrder: 1 },
+        { minSubtotal: 100, maxSubtotal: 150, deliveryFee: 5, sortOrder: 2 },
+      ],
+    });
+  }
+
   // Subscription plans
   await prisma.subscriptionPlan.upsert({
     where: { id: 'plan-monthly-free' },

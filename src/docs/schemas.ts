@@ -968,6 +968,41 @@ export const schemas = {
       sortOrder: { type: 'integer' },
     },
   },
+  DeliverySubtotalRange: {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      minSubtotal: { type: 'number', description: 'Inclusive lower bound.', example: 0 },
+      maxSubtotal: { type: 'number', description: 'Exclusive upper bound.', example: 50 },
+      deliveryFee: { type: 'number', example: 15 },
+    },
+  },
+  DeliverySubtotalPricing: {
+    type: 'object',
+    properties: {
+      freeDeliveryThreshold: { type: 'number', nullable: true, example: 150 },
+      ranges: { type: 'array', items: { $ref: '#/components/schemas/DeliverySubtotalRange' } },
+    },
+  },
+  DeliverySubtotalPricingInput: {
+    type: 'object',
+    required: ['freeDeliveryThreshold', 'ranges'],
+    properties: {
+      freeDeliveryThreshold: { type: 'number', example: 150 },
+      ranges: {
+        type: 'array',
+        items: {
+          type: 'object',
+          required: ['minSubtotal', 'maxSubtotal', 'deliveryFee'],
+          properties: {
+            minSubtotal: { type: 'number', example: 0 },
+            maxSubtotal: { type: 'number', example: 50 },
+            deliveryFee: { type: 'number', example: 15 },
+          },
+        },
+      },
+    },
+  },
   DeliveryQuoteRequest: {
     type: 'object',
     required: ['cartSubtotal'],
@@ -989,18 +1024,9 @@ export const schemas = {
       deliveryFee: { type: 'number', example: 15.0 },
       pricingRuleApplied: {
         type: 'string',
-        enum: [
-          'NO_BRANCH',
-          'PICKUP_ONLY',
-          'NO_RULES',
-          'NO_LOCATION',
-          'OUT_OF_RANGE',
-          'SUBSCRIPTION',
-          'THRESHOLD',
-          'RULE',
-          'PICKUP',
-          'FLAT',
-        ],
+        description:
+          'Which rule priced the fee. The fee itself is decided by the product subtotal (`SUBTOTAL_RANGE` / `FREE_DELIVERY_THRESHOLD`) — distance no longer prices delivery, only eligibility.',
+        enum: ['NONE', 'SUBTOTAL_RANGE', 'FREE_DELIVERY_THRESHOLD', 'SUBSCRIPTION', 'PICKUP'],
       },
       reason: { type: 'string' },
       deliveryAvailable: { type: 'boolean', example: true },

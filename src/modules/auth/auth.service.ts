@@ -1,17 +1,46 @@
 import bcrypt from 'bcryptjs';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { generateOtpCode, getOtpExpiry, sendOtp } from '../../lib/otp';
 import { signToken } from '../../lib/jwt';
 import { config } from '../../config';
+import { normalizeMobile } from '../../lib/phone';
+import { logAction } from '../audit/audit.service';
 
 const STAFF_ROLES = ['SUPER_ADMIN', 'PICKER', 'DRIVER'] as const;
 
-export async function requestOtp(mobile: string): Promise<{ code?: string }> {
-  let user = await prisma.user.findUnique({ where: { mobile } });
+/**
+ * Create a fresh customer account for a normalized mobile, tolerating the
+ * concurrency race where two simultaneous sign-in attempts both find no
+ * active account and both try to create one. The database's partial-unique
+ * `mobileActive` index (active accounts only) is the actual guard — this
+ * just turns the loser's constraint violation into "use the winner's row"
+ * instead of a raw 500.
+ */
+async function createActiveCustomer(mobile: string) {
+  try {
+    return await prisma.user.create({ data: { mobile } });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      const winner = await prisma.user.findFirst({ where: { mobile, deletedAt: null } });
+      if (winner) return winner;
+    }
+    throw err;
+  }
+}
+
+export async function requestOtp(mobileRaw: string): Promise<{ code?: string }> {
+  const mobile = normalizeMobile(mobileRaw);
+
+  // Only an ACTIVE account may ever be found here — a soft-deleted account
+  // with the same number is invisible to sign-in and is never reactivated.
+  let user = await prisma.user.findFirst({ where: { mobile, deletedAt: null } });
 
   if (!user) {
-    user = await prisma.user.create({ data: { mobile } });
-  } else if (user.role !== 'CUSTOMER') {
+    user = await createActiveCustomer(mobile);
+  }
+
+  if (user.role !== 'CUSTOMER') {
     // Staff accounts must use the staff login (email + password), not OTP.
     throw new Error('This number is registered as a staff account. Use staff login.');
   }
@@ -40,10 +69,14 @@ export async function requestOtp(mobile: string): Promise<{ code?: string }> {
 }
 
 export async function verifyOtp(
-  mobile: string,
+  mobileRaw: string,
   code: string
 ): Promise<{ token: string; user: object }> {
-  const user = await prisma.user.findUnique({ where: { mobile } });
+  const mobile = normalizeMobile(mobileRaw);
+  // Active-only lookup — a stale OTP tied to a since-deleted account's ID
+  // will simply fail the code check below, since it's scoped to whatever
+  // (if any) currently-active row this number resolves to.
+  const user = await prisma.user.findFirst({ where: { mobile, deletedAt: null } });
   if (!user) throw new Error('User not found');
   if (user.role !== 'CUSTOMER') {
     throw new Error('Staff accounts must use the staff login.');
@@ -140,4 +173,63 @@ export async function getMe(userId: string, lang: 'ar' | 'en' = 'ar') {
   if (!user) throw new Error('User not found');
   const { nameAr, ...rest } = user;
   return { ...rest, name: lang === 'ar' ? (nameAr || user.name) : (user.name || nameAr) };
+}
+
+/**
+ * Customer self-deletion (`DELETE /auth/me`). Soft-deletes the CURRENTLY
+ * AUTHENTICATED account only — sets `deletedAt`, which:
+ *   - makes `mobile` free for a brand-new account to claim (see the
+ *     `mobileActive` generated column / partial-unique index), while this
+ *     row keeps its original `mobile` value for legitimate historical
+ *     context (e.g. an order placed under this ID still shows a contact
+ *     number to staff) — it is never reassigned or exposed to another
+ *     account;
+ *   - is checked by `authenticate*` middleware on every request, so the
+ *     bearer token this account is currently using stops working
+ *     immediately, with no separate session/refresh-token store to revoke
+ *     (this API has none — see `docs/paths/auth.ts`);
+ *   - invalidates any outstanding (unused) OTP codes, the only other
+ *     standing "authentication credential" a customer has in this
+ *     password-less flow.
+ *
+ * Deliberately does NOT touch orders, addresses, favorites, cart, or
+ * subscription rows — those are business records preserved under this same
+ * immutable ID (never cascade-deleted, never transferred). Deeper PII
+ * anonymization/hard-deletion beyond this is a separate policy decision the
+ * project has not defined yet; this function implements soft-delete +
+ * credential revocation only, not a full data-erasure guarantee.
+ */
+export async function deleteAccount(userId: string): Promise<{ deletedAt: Date }> {
+  return prisma.$transaction(async (tx) => {
+    const user = await tx.user.findUnique({
+      where: { id: userId },
+      select: { id: true, role: true, deletedAt: true },
+    });
+    if (!user) throw new Error('Account not found');
+    if (user.role !== 'CUSTOMER') {
+      throw new Error('Only customer accounts can be deleted through this endpoint');
+    }
+    if (user.deletedAt) throw new Error('Account already deleted');
+
+    const deletedAt = new Date();
+    await tx.user.update({ where: { id: userId }, data: { deletedAt, isActive: false } });
+    await tx.otpCode.updateMany({
+      where: { userId, usedAt: null },
+      data: { usedAt: deletedAt },
+    });
+
+    await logAction(
+      {
+        actorId: userId,
+        actorRole: 'CUSTOMER',
+        action: 'account.delete',
+        entityType: 'user',
+        entityId: userId,
+        changes: { deletedAt: deletedAt.toISOString() },
+      },
+      tx,
+    );
+
+    return { deletedAt };
+  });
 }

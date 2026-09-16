@@ -3,6 +3,10 @@ import { z } from 'zod';
 import { AuthRequest } from '../../middleware/auth.middleware';
 import { ok, badRequest } from '../../lib/response';
 import { quoteDelivery, loadSubscriptionContext } from '../delivery/delivery.service';
+import { parseLang } from '../categories/category.schema';
+import { prepareCheckoutSchema } from './checkout.schema';
+import { buildCheckoutPreview } from './checkoutPreview.service';
+import { createCheckoutSession } from './checkoutSession.service';
 
 const calculateSchema = z.object({
   customerLatitude: z.number().min(-90).max(90).nullable().optional(),
@@ -65,6 +69,63 @@ export async function calculateDelivery(req: AuthRequest, res: Response): Promis
       maxDeliveryKm: quote.maxDeliveryKm,
       reason: quote.reason,
       message: quote.message,
+    });
+  } catch (err) {
+    badRequest(res, (err as Error).message);
+  }
+}
+
+/**
+ * `POST /checkout/prepare` — one authoritative checkout-preparation call.
+ * Authentication is required (route-level `authenticateCustomer`). Every
+ * value the response needs (address, product prices/availability,
+ * subscription benefit, minimum-order config, delivery quote, pickup
+ * settings) is resolved server-side via `buildCheckoutPreview` — the
+ * request never carries subscription status, subtotal, prices, delivery
+ * fee, coverage result, or raw coordinates. The verified result is stored
+ * as a short-lived, single-use `CheckoutSession` that order creation later
+ * consumes.
+ */
+export async function prepareCheckout(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const body = prepareCheckoutSchema.parse(req.body);
+    const lang = parseLang(body);
+    const customerId = req.user!.userId;
+
+    const preview = await buildCheckoutPreview({
+      customerId,
+      addressId: body.addressId,
+      fulfillmentType: body.selectedFulfillmentType,
+      items: body.items,
+      lang,
+    });
+
+    const session = await createCheckoutSession({
+      customerId,
+      addressId: body.addressId,
+      fulfillmentType: body.selectedFulfillmentType,
+      lang,
+      items: body.items,
+      preview,
+    });
+
+    ok(res, {
+      checkoutSessionId: session.id,
+      expiresAt: session.expiresAt,
+      address: preview.address,
+      items: preview.items,
+      pricing: {
+        subtotal: preview.subtotal,
+        baseDeliveryFee: preview.baseDeliveryFee,
+        subscriptionDiscount: preview.subscriptionDiscount,
+        deliveryFee: preview.deliveryFee,
+        total: preview.total,
+      },
+      minimumOrder: preview.minimumOrder,
+      delivery: preview.delivery,
+      fulfillment: preview.fulfillment,
+      subscriptionBenefit: preview.subscriptionBenefit,
+      blockers: preview.blockers,
     });
   } catch (err) {
     badRequest(res, (err as Error).message);

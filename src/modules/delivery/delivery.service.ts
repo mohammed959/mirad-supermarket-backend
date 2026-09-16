@@ -11,6 +11,8 @@ import {
   findContainingArea,
   isPolygonInsidePolygon,
 } from '../../lib/geo';
+import { toCents } from '../../lib/money';
+import { getDeliverySubtotalPricing, type SubtotalRange } from './deliverySubtotalPricing.service';
 import type { Lang } from '../categories/category.schema';
 
 const pickName = (lang: Lang, en: string | null | undefined, ar: string | null | undefined) =>
@@ -37,7 +39,20 @@ export interface DeliveryQuoteResult {
   straightLineKm: number | null;
   /** Multiplier the admin set to approximate road distance. 1.00 = unchanged. */
   roadDistanceMultiplier: number;
+  /** Final delivery fee — after any subscription benefit. Never negative. */
   fee: number;
+  /** Delivery fee before any subscription benefit is applied — the subtotal
+   *  range's fee, or 0 when the free-delivery threshold is met. Equals
+   *  `fee` whenever there's no active subscription. */
+  baseFee: number;
+  /** The subtotal-pricing range that priced `baseFee`, or null when the
+   *  free-delivery threshold applied (or fee pricing isn't configured). */
+  matchedSubtotalRule: SubtotalRange | null;
+  /** The admin's configured free-delivery threshold, or null when subtotal
+   *  pricing isn't configured at all. */
+  freeDeliveryThreshold: number | null;
+  /** True when the cart subtotal met/exceeded `freeDeliveryThreshold`. */
+  freeDeliveryApplied: boolean;
   /** Home delivery is allowed for this customer. False ⇒ frontend must hide
    *  delivery and Cash-on-Delivery, and the backend will reject delivery orders. */
   deliveryAvailable: boolean;
@@ -81,7 +96,7 @@ export interface DeliveryQuoteResult {
    *  plans can only be offered/used when this is true. */
   subscriptionEligible: boolean;
   /** Indicates which path priced the delivery fee. */
-  pricingRuleApplied: 'NONE' | 'DISTANCE_RULE' | 'SUBSCRIPTION' | 'THRESHOLD' | 'PICKUP';
+  pricingRuleApplied: 'NONE' | 'SUBTOTAL_RANGE' | 'FREE_DELIVERY_THRESHOLD' | 'SUBSCRIPTION' | 'PICKUP';
   hasActiveSubscription: boolean;
   /** Fulfillment types the customer can actually pick right now. */
   availableFulfillmentTypes: Array<'DELIVERY' | 'PICKUP'>;
@@ -168,7 +183,7 @@ export async function quoteDelivery(opts: QuoteOpts): Promise<DeliveryQuoteResul
   // layer's gates (branchConfigured / deliveryAvailable / etc.) still
   // behave as before.
   if (opts.fulfillmentType === 'PICKUP') {
-    return { ...quote, fee: 0, pricingRuleApplied: 'PICKUP' };
+    return { ...quote, fee: 0, baseFee: 0, pricingRuleApplied: 'PICKUP' };
   }
   return quote;
 }
@@ -194,6 +209,10 @@ async function computeDeliveryQuote(opts: QuoteOpts): Promise<DeliveryQuoteResul
     straightLineKm: null,
     roadDistanceMultiplier,
     fee: 0,
+    baseFee: 0,
+    matchedSubtotalRule: null,
+    freeDeliveryThreshold: null,
+    freeDeliveryApplied: false,
     deliveryAvailable: false,
     pickupAvailable: true,
     withinRange: false,
@@ -298,30 +317,14 @@ async function computeDeliveryQuote(opts: QuoteOpts): Promise<DeliveryQuoteResul
   baseQuote.subscriptionEligible = true;
   baseQuote.coverageAreaName = pickName(opts.lang ?? 'ar', area.name, area.nameAr);
 
-  // SUBSCRIPTION PATH — bypass distance rules, apply the plan's benefit.
-  if (hasActiveSubscription) {
-    let fee = 0;
-    if (opts.subscriptionBenefitType === 'DISCOUNTED_DELIVERY' && opts.subscriptionDiscountValue) {
-      fee = Math.max(0, Number(settings.baseFee) - opts.subscriptionDiscountValue);
-    } else if (opts.subscriptionBenefitType === 'CAPPED_DELIVERY' && opts.subscriptionCappedFee) {
-      fee = Math.min(Number(settings.baseFee), opts.subscriptionCappedFee);
-    }
-    return {
-      ...baseQuote,
-      fee: parseFloat(fee.toFixed(2)),
-      deliveryAvailable: true,
-      withinRange: true,
-      reason: 'SUBSCRIPTION',
-      pricingRuleApplied: 'SUBSCRIPTION',
-      availableFulfillmentTypes: ['DELIVERY', 'PICKUP'],
-    };
-  }
-
-  // NON-SUBSCRIBER PATH — distance rules are the only pricing source.
-  // Coverage is already satisfied (polygon), but we still need a configured
-  // fee to charge. Without the distance-rule pricing toggle there's no fee
-  // to apply, so delivery can't be offered to non-subscribers.
-  if (!settings.distanceRulesEnabled) {
+  // ── FEE — decided entirely by the admin's subtotal-pricing config. ─────
+  // Distance/coverage above only ever decided ELIGIBILITY; from here on
+  // distance plays no further part. Calculation order (same for every
+  // customer, subscriber or not):
+  //   subtotal → subtotal-pricing rule → base fee → free-delivery
+  //   threshold → subscription delivery benefit → final fee.
+  const subtotalPricing = await getDeliverySubtotalPricing();
+  if (subtotalPricing.freeDeliveryThreshold == null || subtotalPricing.ranges.length === 0) {
     return {
       ...baseQuote,
       reason: 'NO_RULES',
@@ -329,121 +332,66 @@ async function computeDeliveryQuote(opts: QuoteOpts): Promise<DeliveryQuoteResul
     };
   }
 
-  // (a) Free-delivery threshold short-circuit, if admin enabled it for non-subs.
-  if (
-    settings.freeDeliveryEnabled &&
-    settings.freeDeliveryThreshold &&
-    settings.thresholdForNonSubscribers &&
-    opts.cartSubtotal != null &&
-    opts.cartSubtotal >= Number(settings.freeDeliveryThreshold)
-  ) {
+  const subtotal = opts.cartSubtotal ?? 0;
+  const freeDeliveryThreshold = subtotalPricing.freeDeliveryThreshold;
+  const freeDeliveryApplied = toCents(subtotal) >= toCents(freeDeliveryThreshold);
+
+  let baseFee = 0;
+  let matchedSubtotalRule: SubtotalRange | null = null;
+  if (!freeDeliveryApplied) {
+    const subtotalCents = toCents(subtotal);
+    matchedSubtotalRule =
+      subtotalPricing.ranges.find(
+        (r) => subtotalCents >= toCents(r.minSubtotal) && subtotalCents < toCents(r.maxSubtotal),
+      ) ?? null;
+    if (!matchedSubtotalRule) {
+      // Shouldn't happen for a validated configuration (ranges always run
+      // from 0 to the threshold with no gaps) — fail safe rather than charge
+      // an undefined fee.
+      return {
+        ...baseQuote,
+        reason: 'NO_RULES',
+        message: 'Home delivery pricing is not configured yet. Pickup from Branch is available.',
+      };
+    }
+    baseFee = matchedSubtotalRule.deliveryFee;
+  }
+
+  const sharedFeeFields = {
+    baseFee: parseFloat(baseFee.toFixed(2)),
+    matchedSubtotalRule,
+    freeDeliveryThreshold,
+    freeDeliveryApplied,
+    deliveryAvailable: true,
+    withinRange: true,
+    availableFulfillmentTypes: ['DELIVERY', 'PICKUP'] as Array<'DELIVERY' | 'PICKUP'>,
+  };
+
+  // Subscription delivery benefit — applied AFTER the base fee, never before.
+  if (hasActiveSubscription) {
+    let fee = baseFee;
+    if (opts.subscriptionBenefitType === 'FREE_DELIVERY') {
+      fee = 0;
+    } else if (opts.subscriptionBenefitType === 'DISCOUNTED_DELIVERY' && opts.subscriptionDiscountValue) {
+      fee = Math.max(0, baseFee - opts.subscriptionDiscountValue);
+    } else if (opts.subscriptionBenefitType === 'CAPPED_DELIVERY' && opts.subscriptionCappedFee) {
+      fee = Math.min(baseFee, opts.subscriptionCappedFee);
+    }
     return {
       ...baseQuote,
-      fee: 0,
-      deliveryAvailable: true,
-      withinRange: true,
-      reason: 'THRESHOLD',
-      pricingRuleApplied: 'THRESHOLD',
-      availableFulfillmentTypes: ['DELIVERY', 'PICKUP'],
+      ...sharedFeeFields,
+      fee: parseFloat(fee.toFixed(2)),
+      reason: 'SUBSCRIPTION',
+      pricingRuleApplied: 'SUBSCRIPTION',
     };
-  }
-
-  // (b) Match against the distance-rule table.
-  const rules = await prisma.deliveryDistanceRule.findMany({ orderBy: { sortOrder: 'asc' } });
-  if (rules.length === 0) {
-    return {
-      ...baseQuote,
-      reason: 'NO_RULES',
-      message: 'Home delivery is not configured yet. Pickup from Branch is available.',
-    };
-  }
-
-  let match = rules.find((r) => {
-    const min = Number(r.minKm);
-    const max = r.maxKm != null ? Number(r.maxKm) : Infinity;
-    return distanceKm >= min && distanceKm < max;
-  });
-
-  // Coverage rule: the customer is within `maxDeliveryKm`, so home delivery
-  // must be available. If their distance falls into a gap between ranges
-  // (e.g. ranges 0–5 and 5–15 with maxDeliveryKm=20, customer at 18 km), fall
-  // back to the deliverable range with the largest minKm ≤ distance — this
-  // mirrors the admin's intent that anyone within max can still order.
-  //
-  // An explicit out-of-service hit is NOT softened — that's the admin marking
-  // a range as a hard "no delivery" zone.
-  if (!match) {
-    const candidate = [...rules]
-      .filter((r) => !r.outOfService && Number(r.minKm) <= distanceKm)
-      .sort((a, b) => Number(b.minKm) - Number(a.minKm))[0];
-    if (candidate) match = candidate;
-  }
-
-  if (!match || match.outOfService) {
-    return {
-      ...baseQuote,
-      reason: 'OUT_OF_RANGE',
-      outOfService: true,
-      matchedRule: match
-        ? {
-            id: match.id,
-            minKm: Number(match.minKm),
-            maxKm: match.maxKm != null ? Number(match.maxKm) : null,
-            fee: Number(match.fee),
-            outOfService: true,
-            basketThresholdApplied: false,
-            discountApplied: false,
-            discountAmount: 0,
-          }
-        : null,
-      message: `Your location is ${distanceKm.toFixed(1)} km away — outside delivery coverage. Pickup from Branch is available.`,
-    };
-  }
-
-  // 1. Pick the base fee. Basket-threshold override wins when BOTH the
-  //    threshold and the override fee are configured AND the cart meets it.
-  const basketThreshold = match.basketThreshold != null ? Number(match.basketThreshold) : null;
-  const feeAboveThreshold = match.feeAboveThreshold != null ? Number(match.feeAboveThreshold) : null;
-  const basketThresholdApplied =
-    basketThreshold != null &&
-    feeAboveThreshold != null &&
-    opts.cartSubtotal != null &&
-    opts.cartSubtotal >= basketThreshold;
-  let baseFee = basketThresholdApplied ? feeAboveThreshold! : Number(match.fee);
-
-  // 2. Optionally apply a percentage discount when "now" is in window.
-  //    A missing start/end bound leaves that end open.
-  const now = new Date();
-  const discountPercent = match.discountPercent != null ? Number(match.discountPercent) : null;
-  const inDiscountWindow =
-    discountPercent != null &&
-    discountPercent > 0 &&
-    (match.discountStartDate == null || now >= match.discountStartDate) &&
-    (match.discountEndDate == null || now <= match.discountEndDate);
-  let discountAmount = 0;
-  if (inDiscountWindow) {
-    discountAmount = (baseFee * discountPercent!) / 100;
-    baseFee = Math.max(0, baseFee - discountAmount);
   }
 
   return {
     ...baseQuote,
-    fee: parseFloat(baseFee.toFixed(2)),
-    deliveryAvailable: true,
-    withinRange: true,
-    reason: 'RULE',
-    pricingRuleApplied: 'DISTANCE_RULE',
-    matchedRule: {
-      id: match.id,
-      minKm: Number(match.minKm),
-      maxKm: match.maxKm != null ? Number(match.maxKm) : null,
-      fee: Number(match.fee),
-      outOfService: false,
-      basketThresholdApplied,
-      discountApplied: inDiscountWindow,
-      discountAmount: parseFloat(discountAmount.toFixed(2)),
-    },
-    availableFulfillmentTypes: ['DELIVERY', 'PICKUP'],
+    ...sharedFeeFields,
+    fee: sharedFeeFields.baseFee,
+    reason: freeDeliveryApplied ? 'THRESHOLD' : 'RULE',
+    pricingRuleApplied: freeDeliveryApplied ? 'FREE_DELIVERY_THRESHOLD' : 'SUBTOTAL_RANGE',
   };
 }
 

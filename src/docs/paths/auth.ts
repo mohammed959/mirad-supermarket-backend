@@ -111,5 +111,24 @@ export const authPaths = {
         '401': errorResponses['401'],
       },
     },
+    delete: {
+      tags: ['Authentication', 'Profile'],
+      summary: 'Permanently delete the authenticated customer account (soft-delete)',
+      description:
+        'Customer-only. Sets `deletedAt` on the account, immediately invalidates the bearer token used to call this endpoint (checked by the auth middleware on every subsequent request — there is no separate session/refresh-token store to revoke), and invalidates any outstanding OTP codes. ' +
+        'Orders, addresses, favorites, cart, and subscription history are preserved untouched under the same customer ID — never cascade-deleted, never transferred to another account. ' +
+        'The mobile number becomes available for a brand-new signup (a new customer ID, with none of this history) once deleted; deleted accounts are never reactivated and their ID is never reused. ' +
+        'The response confirms completion only — it never echoes back customer data.',
+      security: bearerAuth,
+      responses: {
+        '200': success(
+          { type: 'object', properties: { deletedAt: { type: 'string', format: 'date-time' } } },
+          'Account deleted',
+          { success: true, message: 'Account deleted', data: { deletedAt: '2026-09-16T12:00:00.000Z' } },
+        ),
+        '400': errorResponses['400'],
+        '401': errorResponses['401'],
+      },
+    },
   },
 };

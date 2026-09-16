@@ -35,3 +35,17 @@ export async function getMe(req: AuthRequest, res: Response): Promise<void> {
   const user = await authService.getMe(req.user!.userId, parseLangQuery(req.query.lang));
   ok(res, user);
 }
+
+/**
+ * `DELETE /auth/me` — the authenticated customer permanently retires their
+ * own account (soft-delete). Confirms completion without echoing back any
+ * customer data — see `authService.deleteAccount` for what actually happens.
+ */
+export async function deleteMe(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const result = await authService.deleteAccount(req.user!.userId);
+    ok(res, { deletedAt: result.deletedAt }, 'Account deleted');
+  } catch (err) {
+    badRequest(res, (err as Error).message);
+  }
+}

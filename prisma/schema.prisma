@@ -112,31 +112,54 @@ enum OrderItemStatus {
 // ─── Users & Auth ─────────────────────────────────────────────────
 
 model User {
-  id           String   @id @default(cuid())
-  mobile       String?  @unique
-  email        String?  @unique
-  username     String?  @unique
+  id           String    @id @default(cuid())
+  // NOT globally unique anymore — a normalized mobile may belong to any
+  // number of soft-deleted (deletedAt != null) rows, but at most one
+  // ACTIVE (deletedAt IS NULL) row. That rule is enforced at the database
+  // level by the generated `mobileActive` column below, not just here.
+  mobile       String?
+  email        String?   @unique
+  username     String?   @unique
   passwordHash String?
   name         String?
   nameAr       String?
-  role         Role     @default(CUSTOMER)
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  role         Role      @default(CUSTOMER)
+  isActive     Boolean   @default(true)
+  // Soft-delete marker for customer self-deletion (`DELETE /auth/me`).
+  // Non-null means the account is permanently retired: it can never sign
+  // in, be reactivated, or reuse this ID. Business records created before
+  // deletion (orders, addresses, etc.) are preserved untouched under this
+  // same ID — never cascade-deleted, never relinked to another account.
+  deletedAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
-  otpCodes        OtpCode[]
-  addresses       CustomerAddress[]
-  orders          Order[]               @relation("CustomerOrders")
-  pickedOrders    Order[]               @relation("PickerOrders")
-  drivenOrders    Order[]               @relation("DriverOrders")
-  subscription    CustomerSubscription?
-  promotionUsages PromotionUsage[]
-  notifications   Notification[]
-  favorites       Favorite[]
-  auditLogs       AuditLog[]
-  cart            Cart?
+  // DB-only generated column: `mobile` while active, NULL once deleted.
+  // MySQL has no native partial/filtered unique index, so this is the
+  // standard workaround — a UNIQUE index on a column that collapses to
+  // NULL for soft-deleted rows (MySQL treats multiple NULLs in a UNIQUE
+  // index as distinct, so any number of deleted rows may still share a
+  // `mobile`). Declared `Unsupported` so Prisma Client never reads/writes
+  // it and `prisma migrate diff` never tries to alter or drop it — see
+  // migration `20260916000000_soft_delete_users` for the actual DDL
+  // (generated column + `users_mobileActive_key` unique index).
+  mobileActive Unsupported("varchar(191)")?
+
+  otpCodes         OtpCode[]
+  addresses        CustomerAddress[]
+  orders           Order[]               @relation("CustomerOrders")
+  pickedOrders     Order[]               @relation("PickerOrders")
+  drivenOrders     Order[]               @relation("DriverOrders")
+  subscription     CustomerSubscription?
+  promotionUsages  PromotionUsage[]
+  notifications    Notification[]
+  favorites        Favorite[]
+  auditLogs        AuditLog[]
+  cart             Cart?
+  checkoutSessions CheckoutSession[]
 
   @@index([mobile])
+  @@index([mobile, deletedAt])
   @@index([email])
   @@index([username])
   @@index([role])
@@ -353,32 +376,39 @@ model ProductVariant {
 // ─── Orders ───────────────────────────────────────────────────────
 
 model Order {
-  id                    String          @id @default(cuid())
-  orderNumber           String          @unique
-  customerId            String
-  addressId             String?
-  pickerId              String?
-  driverId              String?
-  status                OrderStatus     @default(NEW)
-  fulfillmentType       FulfillmentType @default(DELIVERY)
-  paymentMethod         PaymentMethod
-  paymentStatus         PaymentStatus   @default(PENDING)
-  subtotal              Decimal         @db.Decimal(10, 2)
-  discountTotal         Decimal         @default(0) @db.Decimal(10, 2)
-  deliveryFee           Decimal         @default(0) @db.Decimal(10, 2)
-  total                 Decimal         @db.Decimal(10, 2)
-  notes                 String?         @db.Text
-  replacementPreference String?         @db.Text
-  paymentProofUrl       String?
-  deliveryLat           Decimal?        @db.Decimal(10, 8)
-  deliveryLng           Decimal?        @db.Decimal(11, 8)
-  distanceKm            Decimal?        @db.Decimal(8, 2)
+  id                      String          @id @default(cuid())
+  orderNumber             String          @unique
+  customerId              String
+  addressId               String?
+  pickerId                String?
+  driverId                String?
+  status                  OrderStatus     @default(NEW)
+  fulfillmentType         FulfillmentType @default(DELIVERY)
+  paymentMethod           PaymentMethod
+  paymentStatus           PaymentStatus   @default(PENDING)
+  subtotal                Decimal         @db.Decimal(10, 2)
+  discountTotal           Decimal         @default(0) @db.Decimal(10, 2)
+  deliveryFee             Decimal         @default(0) @db.Decimal(10, 2)
+  total                   Decimal         @db.Decimal(10, 2)
+  notes                   String?         @db.Text
+  replacementPreference   String?         @db.Text
+  paymentProofUrl         String?
+  deliveryLat             Decimal?        @db.Decimal(10, 8)
+  deliveryLng             Decimal?        @db.Decimal(11, 8)
+  distanceKm              Decimal?        @db.Decimal(8, 2)
   // Up to 3 customer-provided delivery-location photos (Bunny CDN URLs) so
   // the driver can find the exact spot. Stored as a JSON array of URL
   // strings — the images themselves live in Bunny, not the DB.
-  deliveryImages        Json?
-  subscriptionApplied   Boolean         @default(false)
-  rejectionReason       String?
+  deliveryImages          Json?
+  subscriptionApplied     Boolean         @default(false)
+  // Point-in-time copy of how `deliveryFee` was decided (pricingRuleApplied,
+  // baseDeliveryFee, matchedSubtotalRule, freeDeliveryThreshold,
+  // freeDeliveryApplied) — see `computeDeliveryQuote`/`createOrder`. Null for
+  // pickup orders and for orders placed before this field existed. Exists so
+  // the charged fee stays auditable after the admin later edits or deletes
+  // the subtotal pricing ranges/threshold that produced it.
+  deliveryPricingSnapshot Json?
+  rejectionReason         String?
 
   // Scheduled pickup (Pickup-from-Branch reservations). Only meaningful when
   // fulfillmentType = PICKUP. ASAP orders leave these null.
@@ -632,6 +662,14 @@ model CustomerSubscription {
 
 // ─── Settings ─────────────────────────────────────────────────────
 
+// `distanceRulesEnabled`, `freeDeliveryEnabled`, `freeDeliveryThreshold`, and
+// `thresholdForNonSubscribers` are now DEAD for fee purposes — the delivery
+// FEE is decided exclusively by `DeliverySubtotalRange` +
+// `DeliverySubtotalPricingSettings` below (see `computeDeliveryQuote`).
+// `deliveryEnabled` and `maxDeliveryKm` remain LIVE: they still gate whether
+// home delivery is offered at all, independent of how it's priced. Kept
+// (not dropped) per the same historical-data policy as the other dead
+// columns already documented in `delivery.service.ts`.
 model DeliveryPricingSettings {
   id                         String   @id @default(cuid())
   deliveryEnabled            Boolean  @default(true)
@@ -655,6 +693,11 @@ model DeliveryPricingSettings {
   @@map("delivery_pricing_settings")
 }
 
+// Historical distance-based fee tiers. No longer read to price delivery
+// (superseded by `DeliverySubtotalRange`) — distance is still computed and
+// used for eligibility/coverage reporting, just not for pricing. Preserved,
+// not dropped: existing orders' `distanceKm` and the admin's historical
+// configuration stay intact.
 model DeliveryDistanceRule {
   id           String   @id @default(cuid())
   minKm        Decimal  @db.Decimal(6, 2)
@@ -681,6 +724,37 @@ model DeliveryDistanceRule {
 
   @@index([sortOrder])
   @@map("delivery_distance_rules")
+}
+
+// ─── Subtotal-based delivery pricing (replaces distance-based fee) ──
+//
+// The delivery FEE is now a function of the product subtotal, not distance.
+// `DeliverySubtotalPricingSettings` is a singleton row holding the single
+// free-delivery threshold; `DeliverySubtotalRange` holds the ordered, gapless,
+// non-overlapping paid tiers below it. Validated as a whole on every write
+// (see `deliverySubtotalPricing.service.ts`) — the final range's `maxSubtotal`
+// must equal the threshold, so the two are always consistent by construction.
+model DeliverySubtotalPricingSettings {
+  id                    String   @id @default(cuid())
+  freeDeliveryThreshold Decimal  @db.Decimal(10, 2)
+  updatedAt             DateTime @updatedAt
+
+  @@map("delivery_subtotal_pricing_settings")
+}
+
+model DeliverySubtotalRange {
+  id          String   @id @default(cuid())
+  // Inclusive lower bound.
+  minSubtotal Decimal  @db.Decimal(10, 2)
+  // Exclusive upper bound.
+  maxSubtotal Decimal  @db.Decimal(10, 2)
+  deliveryFee Decimal  @db.Decimal(10, 2)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([sortOrder])
+  @@map("delivery_subtotal_ranges")
 }
 
 model MinimumOrderSettings {
@@ -835,4 +909,43 @@ model CartItem {
 
   @@unique([cartId, productId])
   @@map("cart_items")
+}
+
+// ─── Checkout session ───────────────────────────────────────────────
+//
+// A short-lived, server-verified snapshot produced by `POST
+// /checkout/prepare` and consumed exactly once by order creation. Mirrors
+// the `OtpCode` expire/consume pattern (`expiresAt` + `usedAt`) rather than
+// introducing a new one. `itemsSnapshot` holds the resolved, priced line
+// items at prepare time so order creation can detect drift (price/stock/
+// coverage changes) before writing the order.
+
+model CheckoutSession {
+  id                     String          @id @default(cuid())
+  customerId             String
+  addressId              String?
+  fulfillmentType        FulfillmentType
+  lang                   String
+  itemsSnapshot          Json
+  subtotal               Decimal         @db.Decimal(10, 2)
+  // Delivery fee before any subscription benefit — compared against the
+  // freshly-recomputed value at order-creation time so a subtotal-pricing
+  // config change between prepare and order creation is detected even when
+  // (coincidentally) the final post-subscription fee did not change.
+  baseDeliveryFee        Decimal         @default(0) @db.Decimal(10, 2)
+  deliveryFee            Decimal         @db.Decimal(10, 2)
+  subscriptionDiscount   Decimal         @default(0) @db.Decimal(10, 2)
+  total                  Decimal         @db.Decimal(10, 2)
+  deliveryAvailable      Boolean
+  availableTypesSnapshot Json
+  minimumOrderSatisfied  Boolean
+  hasBlockers            Boolean         @default(false)
+  expiresAt              DateTime
+  usedAt                 DateTime?
+  createdAt              DateTime        @default(now())
+
+  customer User @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@map("checkout_sessions")
 }

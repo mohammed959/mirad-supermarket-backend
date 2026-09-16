@@ -19,6 +19,7 @@ import type { AddressInfo } from 'node:net';
 
 import app from '../../src/app';
 import { signToken } from '../../src/lib/jwt';
+import { prisma } from '../../src/lib/prisma';
 import * as cartSvc from '../../src/modules/cart/cart.service';
 
 // ── Tiny in-file test harness ────────────────────────────────────────
@@ -88,8 +89,32 @@ async function withServer(fn: (port: number) => Promise<void>): Promise<void> {
   }
 }
 
-const customerToken = signToken({ userId: 'u1', role: 'CUSTOMER', scope: 'customer' });
-const staffToken = signToken({ userId: 'staff1', role: 'SUPER_ADMIN', scope: 'staff' });
+// `authenticateCustomer`/`authenticateStaff` now confirm the token's userId
+// resolves to a real, non-deleted account (see auth.middleware.ts) — a
+// forged id for a user that doesn't exist is rejected before any
+// scope/role check runs. So these tokens must point at real DB rows.
+const TAG = `cartroutes${Date.now()}`;
+let customerToken = '';
+let staffToken = '';
+let customerId = '';
+const testUserIds: string[] = [];
+
+async function setup() {
+  const customer = await prisma.user.create({
+    data: { role: 'CUSTOMER', mobile: `+9665${Date.now()}`.slice(0, 13), name: 'Cart Test Customer' },
+  });
+  const staff = await prisma.user.create({
+    data: { role: 'SUPER_ADMIN', email: `${TAG}@example.com`, name: 'Cart Test Staff' },
+  });
+  testUserIds.push(customer.id, staff.id);
+  customerId = customer.id;
+  customerToken = signToken({ userId: customer.id, role: 'CUSTOMER', scope: 'customer' });
+  staffToken = signToken({ userId: staff.id, role: 'SUPER_ADMIN', scope: 'staff' });
+}
+
+async function cleanup() {
+  if (testUserIds.length) await prisma.user.deleteMany({ where: { id: { in: testUserIds } } });
+}
 
 const cartItemFixture = (): cartSvc.CartItemView => ({
   itemId: 'p1',
@@ -137,7 +162,7 @@ test('GET /api/cart returns userId, activeItemsCount and items', async () => {
       const body = JSON.parse(res.body) as {
         data: { userId: string; activeItemsCount: number; items: unknown[] };
       };
-      assert.equal(body.data.userId, 'u1');
+      assert.equal(body.data.userId, customerId);
       assert.equal(body.data.activeItemsCount, 1);
       assert.equal(body.data.items.length, 1);
     });
@@ -178,7 +203,7 @@ test('POST /api/cart/items increment forwards userId from token (not body)', asy
       assert.equal(body.data.quantity, 2);
     });
     assert.equal(calls.length, 1);
-    assert.equal((calls[0] as { userId: string }).userId, 'u1');
+    assert.equal((calls[0] as { userId: string }).userId, customerId);
   } finally {
     restoreAll(replaced);
   }
@@ -246,7 +271,7 @@ test('DELETE /api/cart/items/:productId returns 204 and scopes to the token user
       const res = await request(port, 'DELETE', '/api/cart/items/p1', undefined, customerToken);
       assert.equal(res.status, 204);
     });
-    assert.deepEqual(calls[0], { userId: 'u1', productId: 'p1' });
+    assert.deepEqual(calls[0], { userId: customerId, productId: 'p1' });
   } finally {
     restoreAll(replaced);
   }
@@ -264,7 +289,7 @@ test('DELETE /api/cart clears the whole cart and returns 204', async () => {
       const res = await request(port, 'DELETE', '/api/cart', undefined, customerToken);
       assert.equal(res.status, 204);
     });
-    assert.deepEqual(calls, ['u1']);
+    assert.deepEqual(calls, [customerId]);
   } finally {
     restoreAll(replaced);
   }
@@ -273,15 +298,25 @@ test('DELETE /api/cart clears the whole cart and returns 204', async () => {
 // ── Runner ──────────────────────────────────────────────────────────
 (async () => {
   let failed = 0;
-  for (const [name, fn] of tests) {
-    try {
-      await fn();
-      console.log(`✓ ${name}`);
-    } catch (err) {
-      failed += 1;
-      console.error(`✗ ${name}`);
-      console.error(err);
+  try {
+    await setup();
+    for (const [name, fn] of tests) {
+      try {
+        await fn();
+        console.log(`✓ ${name}`);
+      } catch (err) {
+        failed += 1;
+        console.error(`✗ ${name}`);
+        console.error(err);
+      }
     }
+  } catch (err) {
+    failed += 1;
+    console.error('✗ setup failed');
+    console.error(err);
+  } finally {
+    await cleanup();
+    await prisma.$disconnect();
   }
   console.log(
     `\n${tests.length - failed}/${tests.length} passed` +

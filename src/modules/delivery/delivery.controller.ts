@@ -4,6 +4,11 @@ import { AuthRequest } from '../../middleware/auth.middleware';
 import * as svc from './delivery.service';
 import { ok, badRequest } from '../../lib/response';
 import { parseLang, parseOptionalLangQuery } from '../categories/category.schema';
+import {
+  getDeliverySubtotalPricing,
+  replaceDeliverySubtotalPricing,
+  DeliveryPricingValidationError,
+} from './deliverySubtotalPricing.service';
 
 /**
  * Phase 3: both `calculateFee` and `quote` delegate to the same
@@ -188,6 +193,43 @@ export async function replaceDistanceRules(req: AuthRequest, res: Response): Pro
     const data = await svc.replaceDistanceRules(body.rules);
     ok(res, data, `Saved ${data.length} rule(s).`);
   } catch (err) {
+    badRequest(res, (err as Error).message);
+  }
+}
+
+// ─── Subtotal-based delivery pricing (replaces distance-based fee) ────
+
+const subtotalRangeSchema = z.object({
+  minSubtotal: z.number(),
+  maxSubtotal: z.number(),
+  deliveryFee: z.number(),
+});
+
+// Structural validation only — Zod just ensures the right shape/types
+// reach the service. All business rules (gaps, overlaps, boundary
+// chaining, decimal precision, negative values) are enforced by
+// `validateDeliverySubtotalPricing`, which returns the specific error
+// codes this feature's contract requires (DELIVERY_PRICING_GAP, etc.).
+const subtotalPricingSchema = z.object({
+  freeDeliveryThreshold: z.number(),
+  ranges: z.array(subtotalRangeSchema),
+});
+
+export async function getSubtotalPricing(_req: AuthRequest, res: Response): Promise<void> {
+  const data = await getDeliverySubtotalPricing();
+  ok(res, data);
+}
+
+export async function updateSubtotalPricing(req: AuthRequest, res: Response): Promise<void> {
+  try {
+    const body = subtotalPricingSchema.parse(req.body);
+    const data = await replaceDeliverySubtotalPricing(body);
+    ok(res, data, 'Delivery pricing saved.');
+  } catch (err) {
+    if (err instanceof DeliveryPricingValidationError) {
+      res.status(400).json({ success: false, message: err.message, code: err.code });
+      return;
+    }
     badRequest(res, (err as Error).message);
   }
 }

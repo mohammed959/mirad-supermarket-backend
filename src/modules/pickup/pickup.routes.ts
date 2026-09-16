@@ -8,15 +8,8 @@ const router = Router();
 // Public — read-only feature flag (frontend uses to hide the schedule toggle).
 router.get('/public-settings', asyncHandler(async (_req, res) => {
   const { ok } = await import('../../lib/response');
-  const { getSettings, listSlots } = await import('./pickup.service');
-  const settings = await getSettings();
-  const slots = await listSlots();
-  ok(res, {
-    futurePickupEnabled: settings.futurePickupEnabled,
-    maxReservationDays: settings.maxReservationDays,
-    cutoffTime: settings.cutoffTime,
-    slotCount: slots.length,
-  });
+  const { getPublicPickupSettings } = await import('./pickup.service');
+  ok(res, await getPublicPickupSettings());
 }));
 
 // Admin settings + slot CRUD (staff only)

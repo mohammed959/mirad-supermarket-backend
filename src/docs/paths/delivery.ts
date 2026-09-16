@@ -243,4 +243,54 @@ export const deliveryPaths = {
       },
     },
   },
+
+  '/delivery/subtotal-pricing': {
+    get: {
+      tags: ['Delivery', 'Settings'],
+      summary: 'Get the current subtotal-based delivery pricing (staff only)',
+      description:
+        'The delivery FEE source of truth — replaces distance-based pricing. Distance/coverage (branch, delivery areas, `/delivery/distance-rules`) still decides only whether delivery is offered at all; the fee itself comes from these subtotal ranges + the free-delivery threshold.',
+      security: bearerAuth,
+      responses: {
+        '200': success({ $ref: '#/components/schemas/DeliverySubtotalPricing' }),
+        '401': errorResponses['401'],
+      },
+    },
+    put: {
+      tags: ['Delivery', 'Settings'],
+      summary: 'Replace the complete subtotal-pricing configuration atomically (staff only)',
+      description:
+        'Saves the free-delivery threshold and ALL ranges together — never partially. Ranges must run from 0 with no gaps or overlaps, in order, ending exactly at `freeDeliveryThreshold`. On failure, the previous configuration is left untouched and the response carries a machine-readable `code`: `DELIVERY_PRICING_GAP`, `DELIVERY_PRICING_OVERLAP`, `INVALID_DELIVERY_RANGE`, `INVALID_FREE_DELIVERY_THRESHOLD`, or `INCOMPLETE_DELIVERY_PRICING`.',
+      security: bearerAuth,
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/DeliverySubtotalPricingInput' },
+            example: {
+              freeDeliveryThreshold: 150,
+              ranges: [
+                { minSubtotal: 0, maxSubtotal: 50, deliveryFee: 15 },
+                { minSubtotal: 50, maxSubtotal: 100, deliveryFee: 10 },
+                { minSubtotal: 100, maxSubtotal: 150, deliveryFee: 5 },
+              ],
+            },
+          },
+        },
+      },
+      responses: {
+        '200': success({ $ref: '#/components/schemas/DeliverySubtotalPricing' }, 'Delivery pricing saved.'),
+        '400': {
+          description: 'Validation failed — see `code`.',
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/ErrorResponse' },
+              example: { success: false, message: 'Range 2 leaves a gap after range 1 (50 → 60).', code: 'DELIVERY_PRICING_GAP' },
+            },
+          },
+        },
+        '401': errorResponses['401'],
+      },
+    },
+  },
 };

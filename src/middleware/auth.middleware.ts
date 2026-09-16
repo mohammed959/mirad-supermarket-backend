@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
-import { verifyToken, TokenScope } from '../lib/jwt';
-import { unauthorized, forbidden } from '../lib/response';
+import { verifyToken, TokenScope, JwtPayload } from '../lib/jwt';
+import { unauthorized, forbidden, serverError } from '../lib/response';
+import { prisma } from '../lib/prisma';
 
 export interface AuthRequest extends Request {
   user?: { userId: string; role: string; scope: TokenScope };
@@ -8,20 +9,45 @@ export interface AuthRequest extends Request {
 
 const STAFF_ROLES = ['SUPER_ADMIN', 'PICKER', 'DRIVER'];
 
-function extractAndVerify(req: AuthRequest, res: Response): boolean {
+/**
+ * Verifies the JWT signature, then confirms the account it names is still
+ * active — a soft-deleted account (`deletedAt` set, e.g. via `DELETE
+ * /auth/me`) must lose access immediately even though its previously-issued
+ * token has not expired. There is no session/refresh-token store to revoke
+ * in this stateless-JWT design, so this per-request DB check IS the
+ * revocation mechanism.
+ */
+async function extractAndVerify(req: AuthRequest, res: Response): Promise<boolean> {
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith('Bearer ')) {
     unauthorized(res);
     return false;
   }
   const token = authHeader.slice(7);
+  let payload: JwtPayload;
   try {
-    req.user = verifyToken(token);
-    return true;
+    payload = verifyToken(token);
   } catch {
     unauthorized(res, 'Invalid or expired token');
     return false;
   }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: payload.userId },
+      select: { deletedAt: true },
+    });
+    if (!user || user.deletedAt) {
+      unauthorized(res, 'Invalid or expired token');
+      return false;
+    }
+  } catch {
+    serverError(res, 'Authentication check failed');
+    return false;
+  }
+
+  req.user = payload;
+  return true;
 }
 
 /**
@@ -29,12 +55,12 @@ function extractAndVerify(req: AuthRequest, res: Response): boolean {
  * OTP flow (scope='customer'). Staff tokens are rejected with 403 even if
  * the bearer somehow holds CUSTOMER role on the user record.
  */
-export function authenticateCustomer(
+export async function authenticateCustomer(
   req: AuthRequest,
   res: Response,
   next: NextFunction,
-): void {
-  if (!extractAndVerify(req, res)) return;
+): Promise<void> {
+  if (!(await extractAndVerify(req, res))) return;
   if (req.user!.scope !== 'customer') {
     forbidden(res, 'Customer session required');
     return;
@@ -51,12 +77,12 @@ export function authenticateCustomer(
  * email/password login (scope='staff') with a known staff role. Customer
  * tokens are rejected.
  */
-export function authenticateStaff(
+export async function authenticateStaff(
   req: AuthRequest,
   res: Response,
   next: NextFunction,
-): void {
-  if (!extractAndVerify(req, res)) return;
+): Promise<void> {
+  if (!(await extractAndVerify(req, res))) return;
   if (req.user!.scope !== 'staff' || !STAFF_ROLES.includes(req.user!.role)) {
     forbidden(res, 'Staff session required');
     return;
@@ -70,12 +96,12 @@ export function authenticateStaff(
  * /auth/me). The scope is still attached, so downstream code can still
  * tell which kind of session it is talking to.
  */
-export function authenticateAny(
+export async function authenticateAny(
   req: AuthRequest,
   res: Response,
   next: NextFunction,
-): void {
-  if (!extractAndVerify(req, res)) return;
+): Promise<void> {
+  if (!(await extractAndVerify(req, res))) return;
   next();
 }
 

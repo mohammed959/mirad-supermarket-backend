@@ -20,5 +20,9 @@ router.put('/settings',        authenticateStaff, asyncHandler(ctrl.updateSettin
 router.put('/minimum-order',   authenticateStaff, asyncHandler(ctrl.updateMinimumOrder));
 router.get('/distance-rules',  authenticateStaff, asyncHandler(ctrl.getDistanceRules));
 router.put('/distance-rules',  authenticateStaff, asyncHandler(ctrl.replaceDistanceRules));
+// Subtotal-based delivery pricing — the fee source of truth. Distance-rules
+// above are kept (historical data / eligibility) but no longer price delivery.
+router.get('/subtotal-pricing', authenticateStaff, asyncHandler(ctrl.getSubtotalPricing));
+router.put('/subtotal-pricing', authenticateStaff, asyncHandler(ctrl.updateSubtotalPricing));
 
 export default router;

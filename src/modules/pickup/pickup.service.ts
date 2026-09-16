@@ -57,6 +57,22 @@ export async function updateSettings(
   return updated;
 }
 
+/**
+ * Public read-only feature summary — backs `GET /pickup/public-settings`
+ * and is reused (not re-fetched over HTTP) by `POST /checkout/prepare` so
+ * both surfaces report the identical flag.
+ */
+export async function getPublicPickupSettings() {
+  const settings = await getSettings();
+  const slots = await listSlots();
+  return {
+    futurePickupEnabled: settings.futurePickupEnabled,
+    maxReservationDays: settings.maxReservationDays,
+    cutoffTime: settings.cutoffTime,
+    slotCount: slots.length,
+  };
+}
+
 // ─── Slots CRUD ──────────────────────────────────────────────────────
 
 export async function listSlots(includeInactive = false) {

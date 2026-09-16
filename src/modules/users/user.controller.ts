@@ -108,7 +108,14 @@ export async function getOne(req: AuthRequest, res: Response): Promise<void> {
 }
 
 export async function updateMe(req: AuthRequest, res: Response): Promise<void> {
-  const data = await svc.updateUser(req.user!.userId, req.body);
+  // Whitelist explicitly — this endpoint must never let a customer set
+  // fields like role/isActive/deletedAt/mobile on their own record via a
+  // raw body passthrough.
+  const { name, nameAr } = (req.body ?? {}) as { name?: unknown; nameAr?: unknown };
+  const data = await svc.updateUser(req.user!.userId, {
+    name: typeof name === 'string' ? name : undefined,
+    nameAr: typeof nameAr === 'string' ? nameAr : undefined,
+  });
   ok(res, data);
 }
 

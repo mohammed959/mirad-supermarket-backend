@@ -1,7 +1,7 @@
 import { OrderStatus, Prisma, FulfillmentType } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { generateOrderNumber } from '../../lib/orderNumber';
-import { CreateOrderInput } from './order.schema';
+import { CreateOrderInput, CreateOrderFromSessionInput } from './order.schema';
 import {
   notifyOrderStatus,
   notifyPaymentUnderReview,
@@ -14,6 +14,8 @@ import { logAction } from '../audit/audit.service';
 import { getProductImageUrl } from '../../lib/productImage';
 import { assertSlotIsBookable } from '../pickup/pickup.service';
 import type { Lang } from '../categories/category.schema';
+import { buildCheckoutPreview, CheckoutPreviewItemInput } from '../checkout/checkoutPreview.service';
+import { getValidCheckoutSession, consumeCheckoutSession } from '../checkout/checkoutSession.service';
 
 const pickName = (lang: Lang, en: string | null | undefined, ar: string | null | undefined) =>
   (lang === 'ar' ? (ar || en) : (en || ar)) ?? null;
@@ -239,6 +241,19 @@ export async function createOrder(customerId: string, input: CreateOrderInput) {
         deliveryImages:
           isPickup || !input.deliveryImages?.length ? undefined : input.deliveryImages,
         subscriptionApplied: quote.pricingRuleApplied === 'SUBSCRIPTION',
+        // Point-in-time copy of how `deliveryFee` was decided, so the
+        // charge stays auditable even after the admin later edits or
+        // deletes the subtotal-pricing ranges/threshold that produced it.
+        deliveryPricingSnapshot: isPickup
+          ? Prisma.JsonNull
+          : ({
+              pricingRuleApplied: quote.pricingRuleApplied,
+              baseDeliveryFee: quote.baseFee,
+              deliveryFee: quote.fee,
+              matchedSubtotalRule: quote.matchedSubtotalRule,
+              freeDeliveryThreshold: quote.freeDeliveryThreshold,
+              freeDeliveryApplied: quote.freeDeliveryApplied,
+            } as Prisma.InputJsonValue),
         pickupType: scheduledFields.pickupType,
         scheduledPickupDate: scheduledFields.scheduledPickupDate,
         scheduledPickupStartTime: scheduledFields.scheduledPickupStartTime,
@@ -359,6 +374,82 @@ export async function createOrder(customerId: string, input: CreateOrderInput) {
       return { ...rest, productName: pickName(lang, item.productName, productNameAr) ?? item.productName };
     }),
   };
+}
+
+export class CheckoutChangedError extends Error {
+  code = 'CHECKOUT_CHANGED' as const;
+  blockers: import('../checkout/checkoutPreview.service').CheckoutBlocker[];
+  constructor(message: string, blockers: import('../checkout/checkoutPreview.service').CheckoutBlocker[] = []) {
+    super(message);
+    this.blockers = blockers;
+  }
+}
+
+/**
+ * Customer order creation via a verified `POST /checkout/prepare` session.
+ * Re-runs the exact same `buildCheckoutPreview` computation the session was
+ * created from — never trusting the session's stored numbers on their own —
+ * and only proceeds into the untouched `createOrder` when nothing material
+ * has drifted (price, stock, coverage, minimum order, subscription benefit,
+ * fulfillment availability). Session is marked consumed only once
+ * `createOrder` has actually succeeded.
+ */
+export async function createOrderFromCheckoutSession(
+  customerId: string,
+  input: CreateOrderFromSessionInput & { paymentMethod: CreateOrderInput['paymentMethod'] },
+) {
+  const session = await getValidCheckoutSession(customerId, input.checkoutSessionId);
+  const items = session.itemsSnapshot as unknown as CheckoutPreviewItemInput[];
+  const lang = session.lang as Lang;
+
+  const preview = await buildCheckoutPreview({
+    customerId,
+    addressId: session.addressId ?? undefined,
+    fulfillmentType: session.fulfillmentType,
+    items,
+    lang,
+  });
+
+  if (preview.blockers.length > 0) {
+    throw new CheckoutChangedError(
+      'Your checkout details have changed since you prepared this order. Please review and try again.',
+      preview.blockers,
+    );
+  }
+
+  const driftedFromPrepare =
+    preview.subtotal !== Number(session.subtotal) ||
+    preview.baseDeliveryFee !== Number(session.baseDeliveryFee) ||
+    preview.deliveryFee !== Number(session.deliveryFee) ||
+    preview.subscriptionDiscount !== Number(session.subscriptionDiscount) ||
+    preview.total !== Number(session.total) ||
+    preview.delivery.available !== session.deliveryAvailable ||
+    preview.minimumOrder.satisfied !== session.minimumOrderSatisfied;
+
+  if (driftedFromPrepare) {
+    throw new CheckoutChangedError(
+      'Checkout totals have changed since you prepared this order. Please prepare checkout again.',
+    );
+  }
+
+  const order = await createOrder(customerId, {
+    lang,
+    fulfillmentType: session.fulfillmentType,
+    addressId: session.addressId ?? undefined,
+    paymentMethod: input.paymentMethod,
+    notes: input.notes,
+    replacementPreference: input.replacementPreference,
+    deliveryLat: preview.address?.latitude,
+    deliveryLng: preview.address?.longitude,
+    pickupType: input.pickupType ?? undefined,
+    scheduledPickupDate: input.scheduledPickupDate ?? undefined,
+    scheduledPickupSlotId: input.scheduledPickupSlotId ?? undefined,
+    items,
+  });
+
+  await consumeCheckoutSession(session.id);
+
+  return order;
 }
 
 // ─── Car pickup details (curbside) ───────────────────────────────────

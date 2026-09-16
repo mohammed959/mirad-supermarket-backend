@@ -31,6 +31,31 @@ export const createOrderSchema = z.object({
     .min(1, 'Order must have at least one item'),
 });
 
+/**
+ * Customer order creation via a verified `POST /checkout/prepare` session.
+ * Deliberately narrow — fulfillment type, address, items, and pricing all
+ * come from the checkout session (re-verified at creation time), never
+ * from this body. No `deliveryImages` field exists in this flow.
+ */
+export const createOrderFromSessionSchema = z.object({
+  checkoutSessionId: z.string().min(1),
+  // Not part of checkout/prepare's pricing computation — this is the
+  // customer's payment choice, still required to create any order (COD /
+  // bank transfer / pay at branch), exactly as the legacy schema requires it.
+  paymentMethod: z.enum(['CASH_ON_DELIVERY', 'BANK_TRANSFER', 'PAY_AT_BRANCH']),
+  notes: z.string().optional(),
+  replacementPreference: z.string().optional(),
+  pickupType: z.enum(['ASAP', 'SCHEDULED']).nullable().optional(),
+  scheduledPickupDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'scheduledPickupDate must be YYYY-MM-DD')
+    .nullable()
+    .optional(),
+  scheduledPickupSlotId: z.string().min(1).nullable().optional(),
+});
+
+export type CreateOrderFromSessionInput = z.infer<typeof createOrderFromSessionSchema>;
+
 export const assignPickerSchema = z.object({
   pickerId: z.string().min(1),
 });

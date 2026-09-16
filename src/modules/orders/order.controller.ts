@@ -3,6 +3,7 @@ import { AuthRequest } from '../../middleware/auth.middleware';
 import * as svc from './order.service';
 import {
   createOrderSchema,
+  createOrderFromSessionSchema,
   assignPickerSchema,
   assignDriverSchema,
   rejectOrderSchema,
@@ -11,12 +12,40 @@ import {
 import { parseOptionalLangQuery, parseLangQuery, parseLang } from '../categories/category.schema';
 import { ok, created, notFound, badRequest } from '../../lib/response';
 import { OrderStatus, FulfillmentType } from '@prisma/client';
+import { CheckoutChangedError } from './order.service';
+import { CheckoutSessionError } from '../checkout/checkoutSession.service';
 
 function qs(val: unknown): string | undefined {
   return typeof val === 'string' ? val : undefined;
 }
 
+/**
+ * Customer order creation has two shapes, distinguished by `checkoutSessionId`:
+ *   - present → the new session-based flow: every priced/verified value is
+ *     re-derived from the `/checkout/prepare` session, not from the body.
+ *   - absent → the legacy direct-fields flow, left entirely unchanged for
+ *     any other caller still using it.
+ */
 export async function create(req: AuthRequest, res: Response): Promise<void> {
+  if (req.body && typeof req.body === 'object' && 'checkoutSessionId' in req.body) {
+    const body = createOrderFromSessionSchema.parse(req.body);
+    try {
+      const order = await svc.createOrderFromCheckoutSession(req.user!.userId, body);
+      created(res, order, 'Order placed successfully');
+    } catch (err) {
+      if (err instanceof CheckoutChangedError) {
+        res.status(409).json({ success: false, message: err.message, code: err.code, blockers: err.blockers });
+        return;
+      }
+      if (err instanceof CheckoutSessionError) {
+        res.status(409).json({ success: false, message: err.message, code: err.code });
+        return;
+      }
+      badRequest(res, (err as Error).message);
+    }
+    return;
+  }
+
   const body = createOrderSchema.parse(req.body);
   try {
     const order = await svc.createOrder(req.user!.userId, body);

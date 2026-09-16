@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import { Prisma, Role } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { logAction } from '../audit/audit.service';
+import { normalizeMobile } from '../../lib/phone';
 
 const BCRYPT_ROUNDS = 10;
 
@@ -12,25 +13,36 @@ export async function createUser(input: {
   role: Role;
   isActive?: boolean;
 }, actorId: string) {
-  const mobile = input.mobile.trim();
-  if (!mobile) throw new Error('Mobile is required');
+  if (!input.mobile.trim()) throw new Error('Mobile is required');
+  const mobile = normalizeMobile(input.mobile);
 
-  const existing = await prisma.user.findUnique({ where: { mobile } });
+  // Active-only check — a mobile that only matches a soft-deleted account is
+  // free to reuse. The database's partial-unique `mobileActive` index is the
+  // actual guard against a concurrent create racing this check.
+  const existing = await prisma.user.findFirst({ where: { mobile, deletedAt: null } });
   if (existing) throw new Error('A user with this mobile already exists');
 
-  const user = await prisma.user.create({
-    data: {
-      mobile,
-      name: input.name?.trim() || null,
-      nameAr: input.nameAr?.trim() || null,
-      role: input.role,
-      isActive: input.isActive ?? true,
-    },
-    select: {
-      id: true, mobile: true, name: true, nameAr: true,
-      role: true, isActive: true, createdAt: true,
-    },
-  });
+  let user;
+  try {
+    user = await prisma.user.create({
+      data: {
+        mobile,
+        name: input.name?.trim() || null,
+        nameAr: input.nameAr?.trim() || null,
+        role: input.role,
+        isActive: input.isActive ?? true,
+      },
+      select: {
+        id: true, mobile: true, name: true, nameAr: true,
+        role: true, isActive: true, createdAt: true,
+      },
+    });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      throw new Error('A user with this mobile already exists');
+    }
+    throw err;
+  }
 
   await logAction({
     actorId, actorRole: 'SUPER_ADMIN',
