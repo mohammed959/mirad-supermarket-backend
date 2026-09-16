@@ -5,6 +5,7 @@ export const customerPaths = {
     patch: {
       tags: ['Profile', 'Customer'],
       summary: 'Update the current customer profile',
+      description: 'Whitelisted to `name`/`nameAr` only — see `UpdateProfileRequest`. Mobile can never be changed here.',
       security: bearerAuth,
       requestBody: {
         required: true,
@@ -14,7 +15,6 @@ export const customerPaths = {
             example: {
               name: 'Mohammed AlSoder',
               nameAr: 'محمد السدر',
-              email: 'user@example.com',
             },
           },
         },

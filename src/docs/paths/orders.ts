@@ -40,19 +40,46 @@ export const orderPaths = {
     },
     post: {
       tags: ['Orders'],
-      summary: 'Create an order (customer only)',
+      summary: 'Create an order (customer only) — two request shapes',
+      description:
+        'Branches on whether `checkoutSessionId` is present in the body:\n\n' +
+        '- **Present** (recommended customer checkout flow): every priced/verified value comes from the `POST /checkout/prepare` session, re-validated against the CURRENT database state (address coverage, product availability/stock/price, minimum order, subscription benefit, subtotal-based delivery pricing). If anything material drifted since prepare, the order is NOT created and `409 CHECKOUT_CHANGED` is returned instead — the customer must review the refreshed summary and try again. `deliveryImages` is not part of this flow.\n' +
+        '- **Absent** (legacy direct-fields flow, still used by other callers): the body supplies `fulfillmentType`, `addressId`/coordinates, `paymentMethod`, and `items` directly, exactly as before.\n\n' +
+        'Both paths share the same underlying validations, transaction, inventory reservation, and side effects.',
       security: bearerAuth,
       requestBody: {
         required: true,
         content: {
           'application/json': {
-            schema: { $ref: '#/components/schemas/CreateOrderRequest' },
-            example: {
-              fulfillmentType: 'DELIVERY',
-              addressId: 'clw...',
-              paymentMethod: 'CASH_ON_DELIVERY',
-              notes: 'Please leave at the door',
-              items: [{ productId: 'clw...', quantity: 2 }],
+            schema: {
+              oneOf: [
+                { $ref: '#/components/schemas/CreateOrderFromSessionRequest' },
+                { $ref: '#/components/schemas/CreateOrderRequest' },
+              ],
+            },
+            examples: {
+              fromCheckoutSession: {
+                summary: 'Customer checkout (recommended)',
+                value: {
+                  checkoutSessionId: 'clw...',
+                  paymentMethod: 'CASH_ON_DELIVERY',
+                  notes: 'Please leave at the door',
+                  replacementPreference: '',
+                  pickupType: null,
+                  scheduledPickupDate: null,
+                  scheduledPickupSlotId: null,
+                },
+              },
+              legacyDirectFields: {
+                summary: 'Legacy direct fields',
+                value: {
+                  fulfillmentType: 'DELIVERY',
+                  addressId: 'clw...',
+                  paymentMethod: 'CASH_ON_DELIVERY',
+                  notes: 'Please leave at the door',
+                  items: [{ productId: 'clw...', quantity: 2 }],
+                },
+              },
             },
           },
         },
@@ -61,6 +88,7 @@ export const orderPaths = {
         '201': success({ $ref: '#/components/schemas/Order' }, 'Order created'),
         '400': errorResponses['400'],
         '403': errorResponses['403'],
+        '409': errorResponses['409'],
       },
     },
   },

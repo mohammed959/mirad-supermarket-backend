@@ -48,6 +48,20 @@ export const errorResponses = {
       },
     },
   },
+  '409': {
+    description:
+      'Conflict — see `code`. For checkout-session order creation: `CHECKOUT_CHANGED` (pricing/stock/coverage drifted since prepare — review the summary and prepare again), `SESSION_EXPIRED`, `SESSION_CONSUMED`, or `SESSION_NOT_FOUND`.',
+    content: {
+      'application/json': {
+        schema: { $ref: '#/components/schemas/ErrorResponse' },
+        example: {
+          success: false,
+          message: 'Your checkout details have changed since you prepared this order. Please review and try again.',
+          code: 'CHECKOUT_CHANGED',
+        },
+      },
+    },
+  },
   '422': {
     description: 'Unprocessable — semantic validation error',
     content: {

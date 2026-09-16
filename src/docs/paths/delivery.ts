@@ -182,7 +182,8 @@ export const deliveryPaths = {
       tags: ['Delivery', 'Settings'],
       summary: 'Update delivery pricing settings (staff only)',
       description:
-        'Zod-whitelisted fields: `deliveryEnabled`, `maxDeliveryKm`, `distanceRulesEnabled`, `roadDistanceMultiplier`, `baseFee`, `freeDeliveryEnabled`, `freeDeliveryThreshold`, `thresholdForNonSubscribers`. Unknown keys are silently stripped.',
+        'Zod-whitelisted fields: `deliveryEnabled`, `maxDeliveryKm`, `distanceRulesEnabled`, `roadDistanceMultiplier`, `baseFee`, `freeDeliveryEnabled`, `freeDeliveryThreshold`, `thresholdForNonSubscribers`. Unknown keys are silently stripped. ' +
+        'Only `deliveryEnabled` and `maxDeliveryKm` are LIVE — they still gate whether delivery is offered at all. `distanceRulesEnabled`, `baseFee`, `freeDeliveryEnabled`, `freeDeliveryThreshold`, and `thresholdForNonSubscribers` are DEAD for pricing purposes: the delivery FEE is decided by `/delivery/subtotal-pricing`, not these fields. Kept writable for historical/back-compat reasons only.',
       security: bearerAuth,
       requestBody: {
         required: true,
@@ -203,7 +204,9 @@ export const deliveryPaths = {
   '/delivery/distance-rules': {
     get: {
       tags: ['Delivery', 'Settings'],
-      summary: 'List distance-based fee rules (staff only)',
+      summary: '[Historical] List distance-based fee rules (staff only)',
+      description:
+        'No longer used to price delivery — see `/delivery/subtotal-pricing`. Distance is still computed and reported (`distanceKm`) and the branch\'s delivery-area polygons still decide eligibility, but these per-km rules and their fees are not read by `computeDeliveryQuote` anymore. Preserved for historical reference; not deleted.',
       security: bearerAuth,
       responses: {
         '200': success({
@@ -215,7 +218,8 @@ export const deliveryPaths = {
     },
     put: {
       tags: ['Delivery', 'Settings'],
-      summary: 'Replace the full set of distance rules (staff only)',
+      summary: '[Historical] Replace the full set of distance rules (staff only)',
+      description: 'Still validated and stored, but no longer read to price delivery — see `/delivery/subtotal-pricing`.',
       security: bearerAuth,
       requestBody: {
         required: true,

@@ -31,6 +31,12 @@ export const schemas = {
         description: 'Optional per-field Zod validation errors.',
         nullable: true,
       },
+      code: {
+        type: 'string',
+        nullable: true,
+        description:
+          'Machine-readable error code, present on select 400/409 responses (e.g. `CHECKOUT_CHANGED`, `SESSION_EXPIRED`, `SESSION_CONSUMED`, `SESSION_NOT_FOUND`, `DELIVERY_PRICING_GAP`, `DELIVERY_PRICING_OVERLAP`, `INVALID_DELIVERY_RANGE`, `INVALID_FREE_DELIVERY_THRESHOLD`, `INCOMPLETE_DELIVERY_PRICING`). Absent on plain validation errors.',
+      },
     },
   },
   Pagination: {
@@ -175,10 +181,11 @@ export const schemas = {
   },
   UpdateProfileRequest: {
     type: 'object',
+    description:
+      'Explicitly whitelisted to `name`/`nameAr` only — any other field (including `mobile`, `email`, `role`, `isActive`) is silently ignored. Mobile can never be changed through this endpoint.',
     properties: {
       name: { type: 'string', example: 'Mohammed AlSoder' },
       nameAr: { type: 'string', example: 'محمد السدر' },
-      email: { type: 'string', format: 'email', nullable: true },
     },
   },
   CreateStaffRequest: {
@@ -770,6 +777,12 @@ export const schemas = {
       replacementPreference: { type: 'string' },
       deliveryLat: { type: 'number', minimum: -90, maximum: 90 },
       deliveryLng: { type: 'number', minimum: -180, maximum: 180 },
+      deliveryImages: {
+        type: 'array',
+        maxItems: 3,
+        items: { type: 'string', format: 'uri' },
+        description: 'Up to 3 already-uploaded (via `/uploads/delivery-image`) location photo URLs. Delivery orders only.',
+      },
       pickupType: { $ref: '#/components/schemas/PickupType' },
       scheduledPickupDate: {
         type: 'string',
@@ -791,12 +804,166 @@ export const schemas = {
       },
     },
   },
+  CreateOrderFromSessionRequest: {
+    type: 'object',
+    required: ['checkoutSessionId', 'paymentMethod'],
+    description:
+      'The customer-checkout order-creation shape, used once a `POST /checkout/prepare` session exists. Every priced/verified value (address, items, subtotal, delivery fee, subscription benefit) is re-derived from the session and re-validated against the CURRENT database state — none of it is trusted from this body. `deliveryImages` is not part of this flow.',
+    properties: {
+      checkoutSessionId: { type: 'string', description: 'From `POST /checkout/prepare`.' },
+      paymentMethod: { $ref: '#/components/schemas/PaymentMethod' },
+      notes: { type: 'string' },
+      replacementPreference: { type: 'string' },
+      pickupType: { $ref: '#/components/schemas/PickupType', nullable: true },
+      scheduledPickupDate: {
+        type: 'string',
+        pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+        nullable: true,
+        example: '2026-07-05',
+      },
+      scheduledPickupSlotId: { type: 'string', nullable: true },
+    },
+  },
   UpdateStatusRequest: {
     type: 'object',
     required: ['status'],
     properties: {
       status: { $ref: '#/components/schemas/OrderStatus' },
       note: { type: 'string' },
+    },
+  },
+  CheckoutPrepareRequest: {
+    type: 'object',
+    required: ['selectedFulfillmentType', 'items'],
+    description:
+      'Deliberately narrow — the client supplies only what it actually knows. Subscription status, subtotal, product prices, delivery fee, coverage result, and raw coordinates are never accepted here; all of it is resolved server-side.',
+    properties: {
+      lang: { type: 'string', enum: ['ar', 'en'], description: 'Defaults to `"ar"`.' },
+      addressId: {
+        type: 'string',
+        description: 'Required for DELIVERY. Ownership-checked against the authenticated customer.',
+      },
+      selectedFulfillmentType: { $ref: '#/components/schemas/FulfillmentType' },
+      items: {
+        type: 'array',
+        minItems: 1,
+        items: {
+          type: 'object',
+          required: ['productId', 'quantity'],
+          properties: {
+            productId: { type: 'string' },
+            quantity: { type: 'integer', minimum: 1, example: 2 },
+          },
+        },
+      },
+    },
+  },
+  CheckoutBlocker: {
+    type: 'object',
+    properties: {
+      code: {
+        type: 'string',
+        enum: [
+          'EMPTY_CART', 'ADDRESS_REQUIRED', 'INVALID_ADDRESS', 'OUTSIDE_COVERAGE',
+          'PRODUCT_UNAVAILABLE', 'INSUFFICIENT_STOCK', 'MINIMUM_ORDER_NOT_MET', 'FULFILLMENT_UNAVAILABLE',
+        ],
+      },
+      message: { type: 'string' },
+      productId: { type: 'string', nullable: true },
+    },
+  },
+  CheckoutPreviewItem: {
+    type: 'object',
+    properties: {
+      productId: { type: 'string' },
+      name: { type: 'string', description: 'Localized per the request `lang`.' },
+      sku: { type: 'string', nullable: true },
+      imageUrl: { type: 'string' },
+      unitPrice: { type: 'number', description: 'Current DB price at prepare time.' },
+      quantity: { type: 'integer' },
+      lineTotal: { type: 'number' },
+      available: { type: 'boolean' },
+    },
+  },
+  CheckoutAddressSummary: {
+    type: 'object',
+    nullable: true,
+    properties: {
+      id: { type: 'string' },
+      label: { type: 'string' },
+      addressLine: { type: 'string', nullable: true },
+      city: { type: 'string', nullable: true },
+      latitude: { type: 'number' },
+      longitude: { type: 'number' },
+      deliveryNotes: { type: 'string', nullable: true },
+    },
+  },
+  CheckoutPrepareResponse: {
+    type: 'object',
+    properties: {
+      checkoutSessionId: { type: 'string', description: 'Pass this to `POST /orders` unchanged.' },
+      expiresAt: { type: 'string', format: 'date-time', description: '15 minutes after prepare; single-use.' },
+      address: { $ref: '#/components/schemas/CheckoutAddressSummary' },
+      items: { type: 'array', items: { $ref: '#/components/schemas/CheckoutPreviewItem' } },
+      pricing: {
+        type: 'object',
+        properties: {
+          subtotal: { type: 'number', example: 123.5 },
+          baseDeliveryFee: { type: 'number', description: 'Before any subscription benefit.', example: 5 },
+          subscriptionDiscount: { type: 'number', example: 0 },
+          deliveryFee: { type: 'number', description: 'Final fee — after the subscription benefit.', example: 5 },
+          total: { type: 'number', example: 128.5 },
+        },
+      },
+      minimumOrder: {
+        type: 'object',
+        properties: {
+          enabled: { type: 'boolean' },
+          minimumAmount: { type: 'number' },
+          satisfied: { type: 'boolean' },
+        },
+      },
+      delivery: {
+        type: 'object',
+        properties: {
+          distanceKm: { type: 'number', nullable: true },
+          withinCoverage: { type: 'boolean' },
+          available: { type: 'boolean' },
+          pricingRuleApplied: {
+            type: 'string',
+            enum: ['NONE', 'SUBTOTAL_RANGE', 'FREE_DELIVERY_THRESHOLD', 'SUBSCRIPTION', 'PICKUP'],
+          },
+          matchedSubtotalRule: { $ref: '#/components/schemas/DeliverySubtotalRange' },
+          freeDeliveryThreshold: { type: 'number', nullable: true },
+          freeDeliveryApplied: { type: 'boolean' },
+        },
+      },
+      fulfillment: {
+        type: 'object',
+        properties: {
+          selected: { $ref: '#/components/schemas/FulfillmentType' },
+          availableTypes: { type: 'array', items: { $ref: '#/components/schemas/FulfillmentType' } },
+          pickupSettings: {
+            type: 'object',
+            nullable: true,
+            description: 'Only present when Pickup is currently available.',
+            properties: {
+              futurePickupEnabled: { type: 'boolean' },
+              maxReservationDays: { type: 'integer' },
+              cutoffTime: { type: 'string', nullable: true, example: '22:00' },
+              slotCount: { type: 'integer' },
+            },
+          },
+        },
+      },
+      subscriptionBenefit: {
+        type: 'object',
+        properties: {
+          applied: { type: 'boolean' },
+          type: { $ref: '#/components/schemas/SubscriptionBenefitType' },
+        },
+      },
+      blockers: { type: 'array', items: { $ref: '#/components/schemas/CheckoutBlocker' } },
     },
   },
   AssignPickerRequest: {
