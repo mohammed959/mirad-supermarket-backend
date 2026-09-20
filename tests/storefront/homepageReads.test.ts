@@ -237,7 +237,11 @@ test('listProductCardsForHome: correct where/orderBy/select/pagination + card-on
     include?: unknown;
   };
   assert.equal(findArgs.where.isActive, true);
-  assert.deepEqual(findArgs.where.stock, { gt: 0 });
+  // Availability is now enforced via a raw-SQL-derived id set (`stock -
+  // reserved > 0`), not a plain `stock: { gt: 0 }` filter — see
+  // `getAvailableProductIds` in product.service.ts.
+  assert.equal(findArgs.where.stock, undefined);
+  assert.ok(Array.isArray((findArgs.where.id as { in: unknown[] })?.in));
   assert.equal(findArgs.where.hideFromHome, false);
   assert.equal((findArgs.where as Record<string, unknown>).isFeatured, undefined);
   assert.equal(findArgs.skip, 0);
@@ -384,7 +388,8 @@ test('listFeaturedProductCardsForHome: matches getFeaturedProducts filters, NO o
   };
   assert.equal(findArgs.where.isActive, true);
   assert.equal(findArgs.where.isFeatured, true);
-  assert.deepEqual(findArgs.where.stock, { gt: 0 });
+  assert.equal(findArgs.where.stock, undefined);
+  assert.ok(Array.isArray((findArgs.where.id as { in: unknown[] })?.in));
   assert.equal(findArgs.take, 20);
   assert.equal(findArgs.orderBy, undefined);
   assert.equal(findArgs.include, undefined);

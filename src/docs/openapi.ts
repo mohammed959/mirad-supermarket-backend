@@ -40,6 +40,7 @@ import { inventoryPaths } from './paths/inventory';
 import { settingsPaths } from './paths/settings';
 import { uploadPaths } from './paths/uploads';
 import { storefrontPaths } from './paths/storefront';
+import { contactPaths } from './paths/contact';
 
 // Server URLs already include the `/api` mount prefix, so every documented
 // path key is relative to `/api` (e.g. `/auth/request-otp`). Override via env
@@ -89,6 +90,7 @@ const tags = [
   { name: 'Banners', description: 'Storefront banners.' },
   { name: 'Storefront', description: 'Aggregated public reads that power the marketplace homepage in a single call.' },
   { name: 'Settings', description: 'Admin-managed pricing, home + coverage settings.' },
+  { name: 'Contact', description: 'Mirad contact phone/WhatsApp numbers, admin-managed and publicly readable.' },
   { name: 'Uploads', description: 'Customer image uploads (delivery-location photos) to the CDN.' },
   { name: 'Users (Admin)', description: 'Admin CRUD for staff and customer accounts.' },
   { name: 'Inventory', description: 'Bulk price / stock update via Excel.' },
@@ -154,6 +156,7 @@ export const openapiSpec = {
     ...settingsPaths,
     ...uploadPaths,
     ...storefrontPaths,
+    ...contactPaths,
   },
 };
 

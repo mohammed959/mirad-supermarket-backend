@@ -30,6 +30,7 @@ import pickupRoutes from './modules/pickup/pickup.routes';
 import settingsRoutes from './modules/settings/settings.routes';
 import uploadRoutes from './modules/uploads/upload.routes';
 import storefrontRoutes from './modules/storefront/storefront.routes';
+import contactRoutes from './modules/contact/contact.routes';
 
 const app = express();
 
@@ -92,6 +93,7 @@ app.use('/api/inventory-bulk', bulkSkuRoutes);
 app.use('/api/checkout', checkoutRoutes);
 app.use('/api/pickup', pickupRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/contact-us', contactRoutes);
 app.use('/api/uploads', uploadRoutes);
 app.use('/api/storefront', storefrontRoutes);
 

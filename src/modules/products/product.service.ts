@@ -246,6 +246,8 @@ export async function listProducts(opts: ProductListOptions = {}) {
   // Explicit id lookups (e.g. the cart) must return the requested products
   // regardless of active/stock state, so they bypass the browse gates.
   const byIds = Array.isArray(ids) && ids.length > 0;
+  const applyStockGate = !includeInactive && !includeOutOfStock && !byIds;
+  const availableIds = applyStockGate ? await getAvailableProductIds() : null;
 
   const where: Prisma.ProductWhereInput = {
     ...(byIds && { id: { in: ids } }),
@@ -263,11 +265,9 @@ export async function listProducts(opts: ProductListOptions = {}) {
         { barcode: { contains: search } },
       ],
     }),
-    // Browsing hides products with zero available stock; admin / search / id
-    // lookups bypass this.
-    ...(!includeInactive && !includeOutOfStock && !byIds && {
-      stock: { gt: 0 },
-    }),
+    // Browsing hides products with zero available (stock - reserved) stock;
+    // admin / search-with-flags / id lookups bypass this.
+    ...(availableIds && { id: { in: availableIds } }),
   };
 
   const [products, total] = await Promise.all([
@@ -386,11 +386,12 @@ export async function adjustProductStock(productId: string, input: AdjustStockIn
 }
 
 export async function getFeaturedProducts() {
+  const availableIds = await getAvailableProductIds();
   const products = await prisma.product.findMany({
     where: {
       isActive: true,
       isFeatured: true,
-      stock: { gt: 0 },
+      id: { in: availableIds },
     },
     include: PRODUCT_INCLUDE,
     take: 20,
@@ -402,7 +403,7 @@ export async function getFeaturedProducts() {
  * Storefront-home optimised all-products read.
  *
  * Matches today's `listProducts({ excludeHiddenFromHome: true })` filters
- * (`isActive`, `stock > 0`, `hideFromHome: false`) and its `createdAt desc`
+ * (`isActive`, available stock, `hideFromHome: false`) and its `createdAt desc`
  * ordering. Runs `findMany + count` in parallel so the aggregator can
  * compute `hasMore = total > items.length`.
  *
@@ -423,9 +424,10 @@ export async function listProductCardsForHome(
 ): Promise<{ items: LocalizedProductCard[]; total: number }> {
   const { page = 1, limit = 20, excludeHiddenFromHome = false, lang = 'ar' } = opts;
 
+  const availableIds = await getAvailableProductIds();
   const where: Prisma.ProductWhereInput = {
     isActive: true,
-    stock: { gt: 0 },
+    id: { in: availableIds },
     ...(excludeHiddenFromHome && { hideFromHome: false }),
   };
 
@@ -459,7 +461,7 @@ export async function listProductCardsForHome(
  * Storefront-home optimised featured-products read.
  *
  * Preserves today's `getFeaturedProducts()` behavior exactly:
- *   - filters: `isActive`, `isFeatured`, `stock > 0`
+ *   - filters: `isActive`, `isFeatured`, available stock
  *   - ordering: none (Prisma default — matches today verbatim)
  *   - cap: `take: 20`
  *
@@ -470,11 +472,12 @@ export async function listFeaturedProductCardsForHome(
   limit = 20,
   lang: Lang = 'ar',
 ): Promise<LocalizedProductCard[]> {
+  const availableIds = await getAvailableProductIds();
   const rows = await prisma.product.findMany({
     where: {
       isActive: true,
       isFeatured: true,
-      stock: { gt: 0 },
+      id: { in: availableIds },
     },
     select: {
       id: true,
@@ -489,6 +492,29 @@ export async function listFeaturedProductCardsForHome(
     take: limit,
   });
   return (rows as unknown as ProductRow[]).map((row) => toLocalizedProductCard(row, lang));
+}
+
+// ─── Customer-facing availability gate ──────────────────────────────
+//
+// Every customer browse/search query below must exclude products with no
+// sellable stock — the same `stock - reserved > 0` rule `isProductAvailable`
+// already encodes, just enforced at the query level (not by filtering rows
+// out in application code after the fact, which would silently break
+// `count()` totals and LIMIT/OFFSET pagination). Prisma has no way to
+// compare two columns of the same row in a `where` filter, so this one raw
+// lookup stands in for that single condition; every other filter (category,
+// search term, pagination, ordering) stays on the normal Prisma query via
+// `id: { in: [...] }`.
+//
+// Admin/internal reads (`getProductById`, `listLowStockProducts`, and
+// `listProducts`/`searchProducts` when called with `includeOutOfStock` /
+// `includeInactive` / `ids`) intentionally never call this — they must keep
+// seeing zero-stock products.
+async function getAvailableProductIds(): Promise<string[]> {
+  const rows = await prisma.$queryRaw<Array<{ id: string }>>`
+    SELECT \`id\` FROM \`products\` WHERE \`stock\` - \`reserved\` > 0
+  `;
+  return rows.map((r) => r.id);
 }
 
 // ─── Smart search ──────────────────────────────────────────────────
@@ -511,8 +537,9 @@ export async function searchProducts(opts: {
   // by design — barcodes are practically unique even though we don't enforce it
   // in SQL (some products share GS1 lookups via packaging).
   if (barcode && barcode.trim()) {
+    const availableIds = await getAvailableProductIds();
     const product = await prisma.product.findFirst({
-      where: { barcode: barcode.trim(), isActive: true },
+      where: { barcode: barcode.trim(), isActive: true, id: { in: availableIds } },
       include: PRODUCT_INCLUDE,
     });
     if (!product) {
@@ -538,8 +565,10 @@ export async function searchProducts(opts: {
     };
   }
 
+  const availableIds = await getAvailableProductIds();
   const where: Prisma.ProductWhereInput = {
     isActive: true,
+    id: { in: availableIds },
     OR: [
       { name: { contains: term } },
       { nameAr: { contains: term } },
@@ -559,8 +588,9 @@ export async function searchProducts(opts: {
     prisma.product.count({ where }),
   ]);
 
+  // Every returned row is now available by construction — no more sorting
+  // available-before-unavailable needed.
   const annotated = products.map(annotateAvailability);
-  annotated.sort((a, b) => Number(b.available) - Number(a.available));
 
   return {
     products: annotated,
@@ -587,9 +617,11 @@ export async function listLowStockProducts(threshold = 5) {
 export async function searchSuggestions(q: string, limit = 8) {
   const term = q.trim();
   if (!term) return [];
+  const availableIds = await getAvailableProductIds();
   return prisma.product.findMany({
     where: {
       isActive: true,
+      id: { in: availableIds },
       OR: [
         { name: { contains: term } },
         { nameAr: { contains: term } },
@@ -624,7 +656,11 @@ export async function listMarketplaceProducts(opts: MarketplaceListOptions = {})
 }
 
 /**
- * Marketplace detail. Returns the collapsed shape or `null` when missing.
+ * Marketplace detail. Returns the collapsed shape, or `null` when missing
+ * OR when the product has no sellable stock right now (`isProductAvailable`)
+ * — a single-row lookup has no pagination to worry about, so this is a
+ * plain in-memory check rather than the raw-SQL id-set used by the list/
+ * search reads above.
  */
 export async function getMarketplaceProduct(
   id: string,
@@ -634,23 +670,25 @@ export async function getMarketplaceProduct(
     where: { id },
     include: PRODUCT_INCLUDE,
   });
-  return row ? toMarketplaceProduct(row as unknown as ProductRelationRow, lang) : null;
+  if (!row || !isProductAvailable(row)) return null;
+  return toMarketplaceProduct(row as unknown as ProductRelationRow, lang);
 }
 
 /**
  * Marketplace featured strip. Preserves the current
  * `getFeaturedProducts()` filters + cap (`isActive`, `isFeatured`,
- * `stock > 0`, `take: 20` by default).
+ * available stock, `take: 20` by default).
  */
 export async function listMarketplaceFeaturedProducts(
   lang: Lang = 'ar',
   limit = 20,
 ): Promise<MarketplaceProduct[]> {
+  const availableIds = await getAvailableProductIds();
   const rows = await prisma.product.findMany({
     where: {
       isActive: true,
       isFeatured: true,
-      stock: { gt: 0 },
+      id: { in: availableIds },
     },
     include: PRODUCT_INCLUDE,
     take: limit,
@@ -695,9 +733,11 @@ export async function marketplaceSearchSuggestions(
 ): Promise<MarketplaceSuggestion[]> {
   const term = q.trim();
   if (!term) return [];
+  const availableIds = await getAvailableProductIds();
   const rows = await prisma.product.findMany({
     where: {
       isActive: true,
+      id: { in: availableIds },
       OR: [
         { name: { contains: term } },
         { nameAr: { contains: term } },

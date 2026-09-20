@@ -778,6 +778,18 @@ model HomeSettings {
   @@map("home_settings")
 }
 
+// Singleton, same pattern as HomeSettings. Publicly readable (the
+// marketplace's `GET /contact-us` reads this directly) — admin-only to
+// write via `PUT /contact-us`.
+model ContactSettings {
+  id        String   @id @default(cuid())
+  phone     String?
+  whatsapp  String?
+  updatedAt DateTime @updatedAt
+
+  @@map("contact_settings")
+}
+
 // ─── Banners ──────────────────────────────────────────────────────
 
 model Banner {
