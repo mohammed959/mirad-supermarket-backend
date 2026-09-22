@@ -114,11 +114,11 @@ test('blank/whitespace SKU → default product image URL', () => {
   assert.equal(card.imageUrl, config.bunny.defaultProductImageUrl);
 });
 
-test('valid SKU → CDN image URL via getProductImageUrl (identical to today)', () => {
+test('valid SKU → Cloudinary image URL via getProductImageUrl (identical to today)', () => {
   const row = availableProductRow();
   const card = toProductCard(row);
   assert.equal(card.imageUrl, getProductImageUrl(row.sku));
-  assert.ok(card.imageUrl.startsWith(config.bunny.productBaseUrl + '/'));
+  assert.ok(card.imageUrl.startsWith(`https://res.cloudinary.com/${config.cloudinary.cloudName}/image/upload/`));
 });
 
 // The current `decorateProductImages` OVERWRITES any stored `imageUrl`
@@ -143,11 +143,14 @@ test('stored relative image path on the row is also ignored — SKU wins', () =>
   assert.equal(card.imageUrl, getProductImageUrl(availableProductRow().sku));
 });
 
-test('SKU with unsafe characters → sanitized before CDN URL is built', () => {
+test('SKU with unsafe characters → sanitized before Cloudinary URL is built', () => {
   const row: ProductRow = { ...availableProductRow(), sku: 'AB C/1$2' };
   const card = toProductCard(row);
   // getProductImageUrl replaces every non-[A-Za-z0-9._-] char with "_"
-  assert.equal(card.imageUrl, `${config.bunny.productBaseUrl}/AB_C_1_2.${config.bunny.productExtension}`);
+  assert.equal(
+    card.imageUrl,
+    `https://res.cloudinary.com/${config.cloudinary.cloudName}/image/upload/${config.cloudinary.productTransformations}/${config.cloudinary.productFolder}/AB_C_1_2`,
+  );
 });
 
 // ── Decimal price conversion ─────────────────────────────────────────

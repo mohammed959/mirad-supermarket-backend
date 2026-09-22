@@ -1507,7 +1507,7 @@ export const schemas = {
       imageUrl: {
         type: 'string',
         description:
-          'Product image URL derived server-side from `sku` via the CDN convention `${BUNNY_CDN_BASE_URL}/{sku}.{ext}`. Blank/null SKUs fall back to the configured default product image; the frontend swaps to the default on `<img onError>`.',
+          'Product image URL derived server-side from `sku` via Cloudinary — the Cloudinary Public ID equals the product SKU: `https://res.cloudinary.com/{cloudName}/image/upload/f_auto,q_auto/mirad/products/{sku}`. Blank/null SKUs (or a missing Cloudinary asset) fall back to the configured default product image; the frontend swaps to the default on `<img onError>`.',
         example: 'https://cdn.example.net/products/ALM-MLK-1L.png',
       },
       price: {
@@ -1542,7 +1542,7 @@ export const schemas = {
       imageUrl: {
         type: 'string',
         description:
-          'Product image URL derived server-side from `sku` via the CDN convention `${BUNNY_CDN_BASE_URL}/{sku}.{ext}`. Blank/null SKUs fall back to the configured default product image; the frontend swaps to the default on `<img onError>`.',
+          'Product image URL derived server-side from `sku` via Cloudinary — the Cloudinary Public ID equals the product SKU: `https://res.cloudinary.com/{cloudName}/image/upload/f_auto,q_auto/mirad/products/{sku}`. Blank/null SKUs (or a missing Cloudinary asset) fall back to the configured default product image; the frontend swaps to the default on `<img onError>`.',
         example: 'https://cdn.example.net/products/ALM-MLK-1L.png',
       },
       price: {

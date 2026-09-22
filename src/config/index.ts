@@ -24,11 +24,9 @@ export const config = {
     exposeCode: (process.env.OTP_EXPOSE_CODE ?? 'true').toLowerCase() !== 'false',
   },
   bunny: {
-    // Products: ${productBaseUrl}/{sku}.${productExtension}
-    productBaseUrl: stripTrailingSlash(
-      process.env.BUNNY_CDN_BASE_URL ?? 'https://your-zone.b-cdn.net/products'
-    ),
-    productExtension: (process.env.BUNNY_PRODUCT_IMAGE_EXT ?? 'png').replace(/^\./, ''),
+    // Product images moved to Cloudinary (see `cloudinary` below,
+    // `lib/productImage.ts::getProductImageUrl`) — this default fallback is
+    // still just a plain URL, unrelated to which CDN hosts the real assets.
     defaultProductImageUrl:
       process.env.DEFAULT_PRODUCT_IMAGE_URL ??
       'https://your-zone.b-cdn.net/products/default/default.png',
@@ -66,6 +64,22 @@ export const config = {
     customerFolder: (process.env.BUNNY_CUSTOMER_UPLOAD_FOLDER ?? 'Customers').replace(/^\/+|\/+$/g, ''),
     // Folder inside the Storage Zone for admin-uploaded subcategory images.
     subcategoryFolder: (process.env.BUNNY_SUBCATEGORY_UPLOAD_FOLDER ?? 'Subcategories').replace(/^\/+|\/+$/g, ''),
+  },
+  // Product images: Cloudinary Public ID === Product SKU (never barcode).
+  // Delivery URL: https://res.cloudinary.com/{cloudName}/image/upload/{transformations}/{productFolder}/{sku}
+  // Unsigned delivery URLs only need `cloudName` — apiKey/apiSecret are
+  // captured here for any future signed/admin Cloudinary operation
+  // (uploads, deletions) but are NOT used by `getProductImageUrl`.
+  cloudinary: {
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME ?? '',
+    apiKey: process.env.CLOUDINARY_API_KEY ?? '',
+    apiSecret: process.env.CLOUDINARY_API_SECRET ?? '',
+    productFolder: (process.env.CLOUDINARY_PRODUCT_FOLDER ?? 'mirad/products').replace(/^\/+|\/+$/g, ''),
+    // Delivery transformations applied to every product image, centralized
+    // here so they can be changed in one place. `f_auto,q_auto` lets
+    // Cloudinary pick the best format/quality per requesting browser
+    // instead of forcing a fixed extension.
+    productTransformations: process.env.CLOUDINARY_PRODUCT_TRANSFORMATIONS ?? 'f_auto,q_auto',
   },
   isDev: (process.env.NODE_ENV ?? 'development') === 'development',
 };

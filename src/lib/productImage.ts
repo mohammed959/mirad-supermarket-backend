@@ -4,17 +4,28 @@ const SAFE_PATH_RE = /[^A-Za-z0-9._-]/g;
 
 /**
  * Resolve a product image URL from its SKU.
- * Convention: `${BUNNY_CDN_BASE_URL}/{sku}.{ext}` (default ext: `png`).
  *
- * We do NOT verify the file exists at the CDN — the frontend swaps to the
- * default image on `onError`, which is both cheaper and avoids HEAD storms.
+ * Cloudinary Public ID === Product SKU (never `barcode`) — assets are
+ * uploaded externally to `mirad/products/{sku}`, so importing/editing a
+ * product's SKU is the only thing that ever needs to happen; no separate
+ * image mapping or stored URL is required.
+ *
+ * Convention: `https://res.cloudinary.com/{cloudName}/image/upload/{transformations}/{productFolder}/{sku}`
+ * (no forced file extension — `f_auto` lets Cloudinary negotiate format).
+ *
+ * We do NOT verify the asset exists at Cloudinary — the frontend swaps to
+ * the default image on `onError`, which is both cheaper and avoids HEAD
+ * storms. A missing image must never prevent the product from displaying.
  */
 export function getProductImageUrl(sku?: string | null): string {
   if (!sku) return config.bunny.defaultProductImageUrl;
   const trimmed = sku.trim();
   if (!trimmed) return config.bunny.defaultProductImageUrl;
   const safe = trimmed.replace(SAFE_PATH_RE, '_');
-  return `${config.bunny.productBaseUrl}/${safe}.${config.bunny.productExtension}`;
+  const { cloudName, productFolder, productTransformations } = config.cloudinary;
+  if (!cloudName) return config.bunny.defaultProductImageUrl;
+  const transformSegment = productTransformations ? `${productTransformations}/` : '';
+  return `https://res.cloudinary.com/${cloudName}/image/upload/${transformSegment}${productFolder}/${safe}`;
 }
 
 /**
