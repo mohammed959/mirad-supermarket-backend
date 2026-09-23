@@ -3,7 +3,7 @@ import { prisma } from '../../lib/prisma';
 import { quoteDelivery, loadSubscriptionContext } from '../delivery/delivery.service';
 import type { SubtotalRange } from '../delivery/deliverySubtotalPricing.service';
 import { getPublicPickupSettings } from '../pickup/pickup.service';
-import { getProductImageUrl } from '../../lib/productImage';
+import { getProductImageUrl, getProductImageAltUrl } from '../../lib/productImage';
 import type { Lang } from '../categories/category.schema';
 
 const pickName = (lang: Lang, en: string, ar: string) => (lang === 'ar' ? (ar || en) : (en || ar));
@@ -41,6 +41,10 @@ export interface CheckoutPreviewItem {
   name: string;
   sku: string | null;
   imageUrl: string;
+  /** SKU-variant candidate (`{sku}_1`) — tried when `imageUrl` 404s. */
+  imageUrlAlt: string;
+  /** Barcode-derived candidate — tried when `imageUrlAlt` also 404s. */
+  imageUrlFallback: string;
   unitPrice: number;
   quantity: number;
   lineTotal: number;
@@ -148,7 +152,7 @@ export async function buildCheckoutPreview(input: CheckoutPreviewInput): Promise
   const products = productIds.length
     ? await prisma.product.findMany({
         where: { id: { in: productIds } },
-        select: { id: true, name: true, nameAr: true, sku: true, price: true, stock: true, reserved: true, isActive: true },
+        select: { id: true, name: true, nameAr: true, sku: true, barcode: true, price: true, stock: true, reserved: true, isActive: true },
       })
     : [];
   const productById = new Map(products.map((p) => [p.id, p]));
@@ -183,6 +187,8 @@ export async function buildCheckoutPreview(input: CheckoutPreviewInput): Promise
       name,
       sku: product.sku,
       imageUrl: getProductImageUrl(product.sku),
+      imageUrlAlt: getProductImageAltUrl(product.sku),
+      imageUrlFallback: getProductImageUrl(product.barcode),
       unitPrice,
       quantity,
       lineTotal,

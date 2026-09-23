@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
+import { getProductImageUrl, getProductImageAltUrl } from '../../lib/productImage';
 import { assertBrandExists } from '../brands/brand.service';
 import {
   AdjustStockInput,
@@ -63,6 +64,10 @@ export interface MarketplaceSuggestion {
   name: string;
   sku: string | null;
   imageUrl: string | null;
+  /** SKU-variant candidate (`{sku}_1`) — tried when `imageUrl` 404s. */
+  imageUrlAlt: string;
+  /** Barcode-derived candidate — tried when `imageUrlAlt` also 404s. */
+  imageUrlFallback: string;
   offer: number;
 }
 
@@ -439,6 +444,7 @@ export async function listProductCardsForHome(
         name: true,
         nameAr: true,
         sku: true,
+        barcode: true,
         price: true,
         stock: true,
         reserved: true,
@@ -484,6 +490,7 @@ export async function listFeaturedProductCardsForHome(
       name: true,
       nameAr: true,
       sku: true,
+      barcode: true,
       price: true,
       stock: true,
       reserved: true,
@@ -627,7 +634,7 @@ export async function searchSuggestions(q: string, limit = 8) {
         { nameAr: { contains: term } },
       ],
     },
-    select: { id: true, name: true, nameAr: true, imageUrl: true, sku: true },
+    select: { id: true, name: true, nameAr: true, imageUrl: true, sku: true, barcode: true },
     take: limit,
     orderBy: { isFeatured: 'desc' },
   });
@@ -743,7 +750,7 @@ export async function marketplaceSearchSuggestions(
         { nameAr: { contains: term } },
       ],
     },
-    select: { id: true, name: true, nameAr: true, imageUrl: true, sku: true },
+    select: { id: true, name: true, nameAr: true, imageUrl: true, sku: true, barcode: true },
     take: limit,
     orderBy: { isFeatured: 'desc' },
   });
@@ -752,6 +759,8 @@ export async function marketplaceSearchSuggestions(
     name: pickName(lang, row.name, row.nameAr),
     sku: row.sku,
     imageUrl: row.imageUrl,
+    imageUrlAlt: getProductImageAltUrl(row.sku),
+    imageUrlFallback: getProductImageUrl(row.barcode),
     offer: 0,
   }));
 }

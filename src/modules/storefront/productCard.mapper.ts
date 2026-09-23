@@ -16,6 +16,7 @@
 
 import {
   getProductImageUrl,
+  getProductImageAltUrl,
   getCategoryImageUrl,
 } from '../../lib/productImage';
 import {
@@ -45,6 +46,8 @@ export interface ProductRow extends ProductWithStock {
   name: string;
   nameAr: string;
   sku: string | null;
+  /** Optional — only used to derive `imageUrlFallback` when `sku` has no Cloudinary asset. */
+  barcode?: string | null;
   price: number | string | Stringifiable | null;
 }
 
@@ -125,6 +128,8 @@ export function toProductCard(row: ProductRow, available?: boolean): ProductCard
     nameAr: row.nameAr,
     sku: row.sku,
     imageUrl: getProductImageUrl(row.sku),
+    imageUrlAlt: getProductImageAltUrl(row.sku),
+    imageUrlFallback: getProductImageUrl(row.barcode),
     price: normalizePrice(row.price),
     available: typeof available === 'boolean' ? available : isProductAvailable(row),
   };
@@ -150,6 +155,8 @@ export function toLocalizedProductCard(
     name,
     sku: row.sku,
     imageUrl: getProductImageUrl(row.sku),
+    imageUrlAlt: getProductImageAltUrl(row.sku),
+    imageUrlFallback: getProductImageUrl(row.barcode),
     price: normalizePrice(row.price),
     available: typeof available === 'boolean' ? available : isProductAvailable(row),
   };

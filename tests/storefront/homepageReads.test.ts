@@ -249,6 +249,7 @@ test('listProductCardsForHome: correct where/orderBy/select/pagination + card-on
   assert.deepEqual(findArgs.orderBy, { createdAt: 'desc' });
   assert.equal(findArgs.include, undefined, 'must not use include');
   assert.deepEqual(Object.keys(findArgs.select).sort(), [
+    'barcode',
     'id',
     'isActive',
     'name',
@@ -269,7 +270,6 @@ test('listProductCardsForHome: correct where/orderBy/select/pagination + card-on
     'updatedAt',
     'hideFromHome',
     'isFeatured',
-    'barcode',
   ];
   for (const key of forbiddenSelect) {
     assert.equal(
@@ -288,10 +288,15 @@ test('listProductCardsForHome: correct where/orderBy/select/pagination + card-on
       'available',
       'id',
       'imageUrl',
+      'imageUrlAlt',
+      'imageUrlFallback',
       'name',
       'price',
       'sku',
     ]);
+    // barcode is selected internally (to derive imageUrlFallback) but must
+    // never leak onto the DTO itself.
+    assert.equal((card as unknown as Record<string, unknown>).barcode, undefined);
   }
   assert.equal(result.items[0].price, new Prisma.Decimal('6.50').toString());
   assert.equal(result.items[0].imageUrl, getProductImageUrl('ALM-MLK-1L'));
@@ -400,6 +405,8 @@ test('listFeaturedProductCardsForHome: matches getFeaturedProducts filters, NO o
     'available',
     'id',
     'imageUrl',
+    'imageUrlAlt',
+    'imageUrlFallback',
     'name',
     'price',
     'sku',
@@ -446,6 +453,7 @@ test('listSectionsForHome: SQL pre-filter uses isActive only, JS applies the OR 
   // Product select on the item: minimal availability slice + variants (isActive/stock/reserved only).
   const productSelect = args.select.items.select.product.select;
   assert.deepEqual(Object.keys(productSelect).sort(), [
+    'barcode',
     'id',
     'isActive',
     'name',
@@ -622,11 +630,13 @@ test('listSectionsForHome: returned DTO contains NO stock, reserved, variants, o
       'available',
       'id',
       'imageUrl',
+      'imageUrlAlt',
+      'imageUrlFallback',
       'name',
       'price',
       'sku',
     ]);
-    for (const forbidden of ['nameAr', 'stock', 'reserved', 'variants', 'category', 'subcategory', 'brand', 'description', 'isActive']) {
+    for (const forbidden of ['nameAr', 'stock', 'reserved', 'variants', 'category', 'subcategory', 'brand', 'description', 'isActive', 'barcode']) {
       assert.equal(
         (card as unknown as Record<string, unknown>)[forbidden],
         undefined,

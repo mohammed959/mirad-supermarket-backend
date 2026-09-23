@@ -419,7 +419,7 @@ export const schemas = {
   },
   MarketplaceProductSuggestion: {
     type: 'object',
-    required: ['id', 'name', 'sku', 'imageUrl', 'offer'],
+    required: ['id', 'name', 'sku', 'imageUrl', 'imageUrlAlt', 'imageUrlFallback', 'offer'],
     properties: {
       id: { type: 'string' },
       name: {
@@ -428,6 +428,16 @@ export const schemas = {
       },
       sku: { type: 'string', nullable: true },
       imageUrl: { type: 'string', nullable: true },
+      imageUrlAlt: {
+        type: 'string',
+        description:
+          'SKU-variant Cloudinary candidate (`{sku}_1`), tried by the frontend when `imageUrl` has no asset.',
+      },
+      imageUrlFallback: {
+        type: 'string',
+        description:
+          'Barcode-derived Cloudinary candidate, tried by the frontend when `imageUrlAlt` also has no asset. Falls back to the default product image itself when there is no barcode.',
+      },
       offer: { type: 'number', example: 0, description: 'Placeholder offer field. Always `0` for now.' },
     },
   },
@@ -511,13 +521,23 @@ export const schemas = {
   // ── Cart ────────────────────────────────────────────────────────────
   CartItem: {
     type: 'object',
-    required: ['itemId', 'productId', 'name', 'sku', 'imageUrl', 'price', 'quantity', 'subtotal', 'available'],
+    required: ['itemId', 'productId', 'name', 'sku', 'imageUrl', 'imageUrlAlt', 'imageUrlFallback', 'price', 'quantity', 'subtotal', 'available'],
     properties: {
       itemId: { type: 'string', description: 'Currently equal to `productId` — the cart is product-keyed.' },
       productId: { type: 'string' },
       name: { type: 'string', description: 'Localized per request `lang` (query param on GET, body field on POST; default `"ar"`).' },
       sku: { type: 'string', nullable: true },
       imageUrl: { type: 'string', nullable: true },
+      imageUrlAlt: {
+        type: 'string',
+        description:
+          'SKU-variant Cloudinary candidate (`{sku}_1`), tried by the frontend when `imageUrl` has no asset.',
+      },
+      imageUrlFallback: {
+        type: 'string',
+        description:
+          'Barcode-derived Cloudinary candidate, tried by the frontend when `imageUrlAlt` also has no asset. Falls back to the default product image itself when there is no barcode.',
+      },
       price: { type: 'number', example: 6.5 },
       quantity: { type: 'integer', example: 2 },
       subtotal: { type: 'number', example: 13, description: '`price * quantity`, rounded to 2 decimals.' },
@@ -879,6 +899,16 @@ export const schemas = {
       name: { type: 'string', description: 'Localized per the request `lang`.' },
       sku: { type: 'string', nullable: true },
       imageUrl: { type: 'string' },
+      imageUrlAlt: {
+        type: 'string',
+        description:
+          'SKU-variant Cloudinary candidate (`{sku}_1`), tried by the frontend when `imageUrl` has no asset.',
+      },
+      imageUrlFallback: {
+        type: 'string',
+        description:
+          'Barcode-derived Cloudinary candidate, tried by the frontend when `imageUrlAlt` also has no asset. Falls back to the default product image itself when there is no barcode.',
+      },
       unitPrice: { type: 'number', description: 'Current DB price at prepare time.' },
       quantity: { type: 'integer' },
       lineTotal: { type: 'number' },
@@ -1498,7 +1528,7 @@ export const schemas = {
   // `modules/storefront/storefront.types.ts` exactly.
   StorefrontProductCard: {
     type: 'object',
-    required: ['id', 'name', 'nameAr', 'sku', 'imageUrl', 'price', 'available'],
+    required: ['id', 'name', 'nameAr', 'sku', 'imageUrl', 'imageUrlAlt', 'imageUrlFallback', 'price', 'available'],
     properties: {
       id: { type: 'string', example: 'clw7prod1' },
       name: { type: 'string', example: 'Almarai Full Cream Milk 1L' },
@@ -1507,8 +1537,20 @@ export const schemas = {
       imageUrl: {
         type: 'string',
         description:
-          'Product image URL derived server-side from `sku` via Cloudinary — the Cloudinary Public ID equals the product SKU: `https://res.cloudinary.com/{cloudName}/image/upload/f_auto,q_auto/mirad/products/{sku}`. Blank/null SKUs (or a missing Cloudinary asset) fall back to the configured default product image; the frontend swaps to the default on `<img onError>`.',
+          'Product image URL derived server-side from `sku` via Cloudinary — the Cloudinary Public ID equals the product SKU: `https://res.cloudinary.com/{cloudName}/image/upload/f_auto,q_auto/mirad/products/{sku}`. Blank/null SKUs (or a missing Cloudinary asset) fall back to `imageUrlAlt`.',
         example: 'https://cdn.example.net/products/ALM-MLK-1L.png',
+      },
+      imageUrlAlt: {
+        type: 'string',
+        description:
+          'Same Cloudinary convention as `imageUrl`, but keyed by `{sku}_1` — some product photos were uploaded under a SKU-variant filename (e.g. a re-shoot). Tried after `imageUrl` and before `imageUrlFallback`.',
+        example: 'https://res.cloudinary.com/p662lqjy/image/upload/f_auto,q_auto/mirad/products/ALM-MLK-1L_1',
+      },
+      imageUrlFallback: {
+        type: 'string',
+        description:
+          'Same Cloudinary convention as `imageUrl`, but keyed by `barcode` instead of `sku` — some product photos were uploaded under the barcode. The frontend tries `imageUrl`, then `imageUrlAlt`, then `imageUrlFallback`, then its own default. Resolves to the default product image itself when there is no barcode.',
+        example: 'https://res.cloudinary.com/p662lqjy/image/upload/f_auto,q_auto/mirad/products/6221155200011',
       },
       price: {
         type: 'string',
@@ -1528,7 +1570,7 @@ export const schemas = {
 
   StorefrontLocalizedProductCard: {
     type: 'object',
-    required: ['id', 'name', 'sku', 'imageUrl', 'price', 'available'],
+    required: ['id', 'name', 'sku', 'imageUrl', 'imageUrlAlt', 'imageUrlFallback', 'price', 'available'],
     description:
       'Same as `StorefrontProductCard`, but `name` is a SINGLE string localized per the request-body `lang` (`ar` uses `nameAr`, `en` uses `name`; falls back to whichever is populated if the requested translation is blank). `nameAr` is not included on the wire. Used only for `featuredProducts` and `allProducts.items` — `featuredSections[].products` keeps the bilingual `StorefrontProductCard` shape.',
     properties: {
@@ -1542,8 +1584,20 @@ export const schemas = {
       imageUrl: {
         type: 'string',
         description:
-          'Product image URL derived server-side from `sku` via Cloudinary — the Cloudinary Public ID equals the product SKU: `https://res.cloudinary.com/{cloudName}/image/upload/f_auto,q_auto/mirad/products/{sku}`. Blank/null SKUs (or a missing Cloudinary asset) fall back to the configured default product image; the frontend swaps to the default on `<img onError>`.',
+          'Product image URL derived server-side from `sku` via Cloudinary — the Cloudinary Public ID equals the product SKU: `https://res.cloudinary.com/{cloudName}/image/upload/f_auto,q_auto/mirad/products/{sku}`. Blank/null SKUs (or a missing Cloudinary asset) fall back to `imageUrlAlt`.',
         example: 'https://cdn.example.net/products/ALM-MLK-1L.png',
+      },
+      imageUrlAlt: {
+        type: 'string',
+        description:
+          'Same Cloudinary convention as `imageUrl`, but keyed by `{sku}_1` — some product photos were uploaded under a SKU-variant filename (e.g. a re-shoot). Tried after `imageUrl` and before `imageUrlFallback`.',
+        example: 'https://res.cloudinary.com/p662lqjy/image/upload/f_auto,q_auto/mirad/products/ALM-MLK-1L_1',
+      },
+      imageUrlFallback: {
+        type: 'string',
+        description:
+          'Same Cloudinary convention as `imageUrl`, but keyed by `barcode` instead of `sku` — some product photos were uploaded under the barcode. The frontend tries `imageUrl`, then `imageUrlAlt`, then `imageUrlFallback`, then its own default. Resolves to the default product image itself when there is no barcode.',
+        example: 'https://res.cloudinary.com/p662lqjy/image/upload/f_auto,q_auto/mirad/products/6221155200011',
       },
       price: {
         type: 'string',

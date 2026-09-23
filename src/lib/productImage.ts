@@ -17,15 +17,31 @@ const SAFE_PATH_RE = /[^A-Za-z0-9._-]/g;
  * the default image on `onError`, which is both cheaper and avoids HEAD
  * storms. A missing image must never prevent the product from displaying.
  */
-export function getProductImageUrl(sku?: string | null): string {
-  if (!sku) return config.bunny.defaultProductImageUrl;
-  const trimmed = sku.trim();
-  if (!trimmed) return config.bunny.defaultProductImageUrl;
-  const safe = trimmed.replace(SAFE_PATH_RE, '_');
+function buildCloudinaryProductUrl(identifier: string): string {
+  const safe = identifier.replace(SAFE_PATH_RE, '_');
   const { cloudName, productFolder, productTransformations } = config.cloudinary;
   if (!cloudName) return config.bunny.defaultProductImageUrl;
   const transformSegment = productTransformations ? `${productTransformations}/` : '';
   return `https://res.cloudinary.com/${cloudName}/image/upload/${transformSegment}${productFolder}/${safe}`;
+}
+
+export function getProductImageUrl(sku?: string | null): string {
+  if (!sku) return config.bunny.defaultProductImageUrl;
+  const trimmed = sku.trim();
+  if (!trimmed) return config.bunny.defaultProductImageUrl;
+  return buildCloudinaryProductUrl(trimmed);
+}
+
+/**
+ * Second-choice SKU variant: some products have their photo uploaded under
+ * `{sku}_1` instead of the bare SKU (e.g. a re-shoot or a batch upload
+ * convention). Tried after `imageUrl` and before the barcode fallback.
+ */
+export function getProductImageAltUrl(sku?: string | null): string {
+  if (!sku) return config.bunny.defaultProductImageUrl;
+  const trimmed = sku.trim();
+  if (!trimmed) return config.bunny.defaultProductImageUrl;
+  return buildCloudinaryProductUrl(`${trimmed}_1`);
 }
 
 /**
@@ -71,6 +87,12 @@ export const defaultBrandImageUrl = (): string => config.bunny.defaultBrandImage
  *   - category / subcategory → slug
  *   - brand → slug (brand namespace, not category)
  *
+ * Product-shaped objects also get `imageUrlAlt` (from `{sku}_1`, for photos
+ * uploaded under a SKU variant) and `imageUrlFallback` (from `barcode`, for
+ * photos uploaded keyed by barcode instead of SKU). The frontend tries
+ * `imageUrl`, then `imageUrlAlt`, then `imageUrlFallback`, then its own
+ * default before giving up. SKU stays the primary identifier throughout.
+ *
  * Embedded objects are dispatched via the parent key (`brand`,
  * `category`, `subcategory`) so brands and categories — which share
  * `{slug, name, nameAr}` shape after a `select` — go to the right
@@ -100,6 +122,9 @@ const looksLikeCategory = (obj: Record<string, unknown>) =>
 
 const looksLikeVariantRow = (obj: Record<string, unknown>) =>
   typeof obj.sku === 'string' && isPlainObject(obj.product);
+
+const hasNonEmptyString = (obj: Record<string, unknown>, key: string) =>
+  typeof obj[key] === 'string' && (obj[key] as string).trim().length > 0;
 
 function decorate(payload: unknown, parentKey?: string): unknown {
   if (Array.isArray(payload)) {
@@ -134,11 +159,35 @@ function decorate(payload: unknown, parentKey?: string): unknown {
   } else if (looksLikeVariantRow(obj)) {
     const sku = obj.sku as string;
     const product = obj.product as Record<string, unknown>;
-    obj.product = { ...product, imageUrl: getProductImageUrl(sku) };
+    const barcode = typeof product.barcode === 'string' ? product.barcode : undefined;
+    const precomputedAlt = hasNonEmptyString(product, 'imageUrlAlt')
+      ? (product.imageUrlAlt as string)
+      : getProductImageAltUrl(sku);
+    const precomputedFallback = hasNonEmptyString(product, 'imageUrlFallback')
+      ? (product.imageUrlFallback as string)
+      : getProductImageUrl(barcode);
+    obj.product = {
+      ...product,
+      imageUrl: getProductImageUrl(sku),
+      imageUrlAlt: precomputedAlt,
+      imageUrlFallback: precomputedFallback,
+    };
   } else if (looksLikeProduct(obj)) {
     const flatSku = typeof obj.sku === 'string' ? obj.sku : undefined;
     const variants = Array.isArray(obj.variants) ? (obj.variants as Array<{ sku?: string }>) : [];
-    obj.imageUrl = getProductImageUrl(flatSku ?? variants[0]?.sku);
+    const resolvedSku = flatSku ?? variants[0]?.sku;
+    obj.imageUrl = getProductImageUrl(resolvedSku);
+    // A mapper may have already computed these from fields the final DTO
+    // deliberately doesn't expose (e.g. slim storefront/cart/checkout
+    // cards) — respect them instead of recomputing from an absent field,
+    // same precedence rule as `storedImageUrl` below for subcategories.
+    if (!hasNonEmptyString(obj, 'imageUrlAlt')) {
+      obj.imageUrlAlt = getProductImageAltUrl(resolvedSku);
+    }
+    if (!hasNonEmptyString(obj, 'imageUrlFallback')) {
+      const flatBarcode = typeof obj.barcode === 'string' ? obj.barcode : undefined;
+      obj.imageUrlFallback = getProductImageUrl(flatBarcode);
+    }
   } else if (looksLikeCategory(obj)) {
     obj.imageUrl = getCategoryImageUrl(obj.slug as string);
   }

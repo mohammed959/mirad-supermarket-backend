@@ -197,6 +197,8 @@ test('storefront component schemas do not leak forbidden ProductCard fields', ()
     'available',
     'id',
     'imageUrl',
+    'imageUrlAlt',
+    'imageUrlFallback',
     'name',
     'nameAr',
     'price',
@@ -230,7 +232,7 @@ test('storefront component schemas do not leak forbidden ProductCard fields', ()
   // Required list must exactly match the DTO's non-optional fields.
   assert.deepEqual(
     [...productCard.required].sort(),
-    ['available', 'id', 'imageUrl', 'name', 'nameAr', 'price', 'sku'],
+    ['available', 'id', 'imageUrl', 'imageUrlAlt', 'imageUrlFallback', 'name', 'nameAr', 'price', 'sku'],
   );
 });
 
@@ -379,6 +381,8 @@ test('StorefrontProductCard: nullability + required match the DTO exactly', () =
   assertPropNullable('StorefrontProductCard', 'name', false);
   assertPropNullable('StorefrontProductCard', 'nameAr', false);
   assertPropNullable('StorefrontProductCard', 'imageUrl', false);
+  assertPropNullable('StorefrontProductCard', 'imageUrlAlt', false);
+  assertPropNullable('StorefrontProductCard', 'imageUrlFallback', false);
   assertPropNullable('StorefrontProductCard', 'available', false);
   // Nullable
   assertPropNullable('StorefrontProductCard', 'sku', true);

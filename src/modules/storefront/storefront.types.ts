@@ -54,6 +54,10 @@ export interface ProductCard {
   nameAr: string;
   sku: string | null;
   imageUrl: string;
+  /** SKU-variant candidate (`{sku}_1`) — tried when `imageUrl` 404s. */
+  imageUrlAlt: string;
+  /** Barcode-derived candidate — tried when `imageUrlAlt` also 404s. */
+  imageUrlFallback: string;
   /**
    * Price as a decimal string ("6.5", "12.75"). Matches the current wire
    * format produced when Prisma Decimal is serialized via Express. `null`
@@ -76,6 +80,10 @@ export interface LocalizedProductCard {
   name: string;
   sku: string | null;
   imageUrl: string;
+  /** SKU-variant candidate (`{sku}_1`) — tried when `imageUrl` 404s. */
+  imageUrlAlt: string;
+  /** Barcode-derived candidate — tried when `imageUrlAlt` also 404s. */
+  imageUrlFallback: string;
   price: string | null;
   available: boolean;
 }

@@ -59,6 +59,7 @@ export async function listSectionsForHome(lang: Lang = 'ar'): Promise<HomeFeatur
               name: true,
               nameAr: true,
               sku: true,
+              barcode: true,
               price: true,
               stock: true,
               reserved: true,

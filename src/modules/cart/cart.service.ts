@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
+import { getProductImageUrl, getProductImageAltUrl } from '../../lib/productImage';
 import { isProductAvailable } from '../products/productAvailability';
 import type { AddOrAdjustCartItemInput, Lang } from './cart.schema';
 
@@ -11,6 +12,10 @@ export interface CartItemView {
   name: string;
   sku: string | null;
   imageUrl: string | null;
+  /** SKU-variant candidate (`{sku}_1`) — tried when `imageUrl` 404s. */
+  imageUrlAlt: string;
+  /** Barcode-derived candidate — tried when `imageUrlAlt` also 404s. */
+  imageUrlFallback: string;
   price: number;
   quantity: number;
   subtotal: number;
@@ -27,6 +32,8 @@ function toCartItemView(item: CartItemWithProduct, lang: Lang): CartItemView {
     name: pickName(lang, item.product.name, item.product.nameAr),
     sku: item.product.sku,
     imageUrl: item.product.imageUrl,
+    imageUrlAlt: getProductImageAltUrl(item.product.sku),
+    imageUrlFallback: getProductImageUrl(item.product.barcode),
     price,
     quantity: item.quantity,
     subtotal: Math.round(price * item.quantity * 100) / 100,

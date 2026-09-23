@@ -11,7 +11,7 @@ import {
 import { evaluatePromotionsForCart } from '../promotions/promotion.service';
 import { quoteDelivery, loadSubscriptionContext } from '../delivery/delivery.service';
 import { logAction } from '../audit/audit.service';
-import { getProductImageUrl } from '../../lib/productImage';
+import { getProductImageUrl, getProductImageAltUrl } from '../../lib/productImage';
 import { assertSlotIsBookable } from '../pickup/pickup.service';
 import type { Lang } from '../categories/category.schema';
 import { buildCheckoutPreview, CheckoutPreviewItemInput } from '../checkout/checkoutPreview.service';
@@ -1478,7 +1478,7 @@ export async function buildReorderCart(customerId: string, orderId: string, lang
         include: {
           product: {
             select: {
-              id: true, name: true, nameAr: true, sku: true,
+              id: true, name: true, nameAr: true, sku: true, barcode: true,
               price: true, stock: true, reserved: true, isActive: true,
             },
           },
@@ -1486,7 +1486,7 @@ export async function buildReorderCart(customerId: string, orderId: string, lang
             include: {
               product: {
                 select: {
-                  id: true, name: true, nameAr: true, sku: true,
+                  id: true, name: true, nameAr: true, sku: true, barcode: true,
                   price: true, stock: true, reserved: true, isActive: true,
                 },
               },
@@ -1502,6 +1502,10 @@ export async function buildReorderCart(customerId: string, orderId: string, lang
     productId: string;
     productName: string;
     productImage: string | null;
+    /** SKU-variant candidate (`{sku}_1`) — tried when `productImage` 404s. */
+    productImageAlt: string;
+    /** Barcode-derived candidate — tried when `productImageAlt` also 404s. */
+    productImageFallback: string;
     price: number;
     quantity: number;
     priceChanged: boolean;
@@ -1540,6 +1544,8 @@ export async function buildReorderCart(customerId: string, orderId: string, lang
       productId: product.id,
       productName: pickName(lang, product.name, product.nameAr) ?? product.name,
       productImage: getProductImageUrl(product.sku ?? item.productSku),
+      productImageAlt: getProductImageAltUrl(product.sku ?? item.productSku),
+      productImageFallback: getProductImageUrl(product.barcode ?? item.productBarcode),
       price: currentPrice,
       quantity: item.quantity,
       priceChanged: currentPrice !== originalPrice,
@@ -1658,7 +1664,7 @@ export async function getDashboardStats() {
   const topProductRows = topPids.length
     ? await prisma.product.findMany({
         where: { id: { in: topPids } },
-        select: { id: true, name: true, nameAr: true, imageUrl: true, sku: true },
+        select: { id: true, name: true, nameAr: true, imageUrl: true, sku: true, barcode: true },
       })
     : [];
   const mostOrdered = topPids.map((pid) => {
