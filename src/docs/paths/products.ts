@@ -282,6 +282,69 @@ export const productPaths = {
     },
   },
 
+  '/products/export/missing-images': {
+    get: {
+      tags: ['Products'],
+      summary: 'Check the next batch of products for Cloudinary images and download those with none (staff only)',
+      description:
+        'Takes the next 500 products that have never been checked and looks for a Cloudinary image under `{sku}`, then `{sku}_1`, then `{barcode}`. Every product with a definitive answer is marked checked (`imageCheckedAt`, `imageFound`) and is never read again; a product Cloudinary could not answer for stays unchecked and is retried on the next call. Editing a product\'s sku or barcode returns it to the unchecked pool.\n\nReturns an XLSX (Product (Arabic), SKU, Barcode) of the batch\'s products with no image. When there is no file to give, returns JSON instead: `allChecked: true` once every product has been checked, or `missingCount: 0` when every product in the batch had an image.',
+      security: bearerAuth,
+      responses: {
+        '200': {
+          description: 'XLSX of products missing images, or a JSON status message',
+          content: {
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': {
+              schema: { type: 'string', format: 'binary' },
+            },
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  success: { type: 'boolean' },
+                  message: { type: 'string' },
+                  data: {
+                    type: 'object',
+                    properties: {
+                      allChecked: { type: 'boolean' },
+                      missingCount: { type: 'integer', description: 'Present (0) when the batch had no missing images.' },
+                      checked: { type: 'integer' },
+                      unverified: { type: 'integer', description: 'Products Cloudinary could not answer for in this batch.' },
+                      remaining: { type: 'integer' },
+                      total: { type: 'integer' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        '400': errorResponses['400'],
+        '401': errorResponses['401'],
+        '403': errorResponses['403'],
+      },
+    },
+  },
+
+  '/products/export/missing-images/status': {
+    get: {
+      tags: ['Products'],
+      summary: 'Progress of the Cloudinary image check (staff only)',
+      security: bearerAuth,
+      responses: {
+        '200': success({
+          type: 'object',
+          properties: {
+            total: { type: 'integer' },
+            checked: { type: 'integer' },
+            remaining: { type: 'integer' },
+          },
+        }),
+        '401': errorResponses['401'],
+        '403': errorResponses['403'],
+      },
+    },
+  },
+
   '/products/import/excel': {
     post: {
       tags: ['Products'],

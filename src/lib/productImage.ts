@@ -25,6 +25,19 @@ function buildCloudinaryProductUrl(identifier: string): string {
   return `https://res.cloudinary.com/${cloudName}/image/upload/${transformSegment}${productFolder}/${safe}`;
 }
 
+/**
+ * Untransformed delivery URL for `{productFolder}/{identifier}`, used only to
+ * probe whether an asset exists (no `f_auto,q_auto` so Cloudinary doesn't
+ * generate a derived image for a HEAD check). `null` when Cloudinary isn't
+ * configured.
+ */
+export function getCloudinaryProductProbeUrl(identifier: string): string | null {
+  const { cloudName, productFolder } = config.cloudinary;
+  if (!cloudName) return null;
+  const safe = identifier.trim().replace(SAFE_PATH_RE, '_');
+  return `https://res.cloudinary.com/${cloudName}/image/upload/${productFolder}/${safe}`;
+}
+
 export function getProductImageUrl(sku?: string | null): string {
   if (!sku) return config.bunny.defaultProductImageUrl;
   const trimmed = sku.trim();

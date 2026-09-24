@@ -381,7 +381,13 @@ export async function importProductsFromExcel(buffer: Buffer, actorId: string): 
       let productId = existingProductId;
       if (productId) {
         // SKU is deliberately omitted — it's the lookup key, never updated.
-        await prisma.product.update({ where: { id: productId }, data });
+        // A changed barcode invalidates the Cloudinary image audit result.
+        const current = await prisma.product.findUnique({ where: { id: productId }, select: { barcode: true } });
+        const barcodeChanged = (current?.barcode ?? null) !== (barcode ?? null);
+        await prisma.product.update({
+          where: { id: productId },
+          data: { ...data, ...(barcodeChanged && { imageCheckedAt: null, imageFound: null }) },
+        });
         productsUpdated += 1;
       } else {
         const createdProduct = await prisma.product.create({ data: { ...data, sku } });

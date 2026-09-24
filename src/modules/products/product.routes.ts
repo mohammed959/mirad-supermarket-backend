@@ -29,6 +29,8 @@ router.get('/:id', asyncHandler(ctrl.getOne));
 // ── Admin only (staff) ─────────────────────────────────────────────
 router.get('/low-stock', authenticateStaff, asyncHandler(ctrl.lowStock));
 router.get('/import/template', authenticateStaff, asyncHandler(ctrl.downloadTemplate));
+router.get('/export/missing-images', authenticateStaff, asyncHandler(ctrl.exportMissingImages));
+router.get('/export/missing-images/status', authenticateStaff, asyncHandler(ctrl.imageCheckStatus));
 router.post('/import/excel', authenticateStaff, upload.single('file'), asyncHandler(ctrl.importExcel));
 router.post('/', authenticateStaff, asyncHandler(ctrl.create));
 router.put('/:id', authenticateStaff, asyncHandler(ctrl.update));

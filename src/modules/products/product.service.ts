@@ -348,6 +348,17 @@ export async function updateProduct(id: string, data: UpdateProductInput) {
   if (data.descriptionAr !== undefined) payload.descriptionAr = data.descriptionAr;
   if (data.sku !== undefined) payload.sku = data.sku;
   if (data.barcode !== undefined) payload.barcode = data.barcode;
+  if (data.sku !== undefined || data.barcode !== undefined) {
+    // The Cloudinary image audit is keyed by sku/barcode — a change makes the
+    // previous result stale, so the product goes back into the unchecked pool.
+    const current = await prisma.product.findUnique({ where: { id }, select: { sku: true, barcode: true } });
+    const skuChanged = data.sku !== undefined && (data.sku ?? null) !== (current?.sku ?? null);
+    const barcodeChanged = data.barcode !== undefined && (data.barcode ?? null) !== (current?.barcode ?? null);
+    if (skuChanged || barcodeChanged) {
+      payload.imageCheckedAt = null;
+      payload.imageFound = null;
+    }
+  }
   if (data.price !== undefined) payload.price = data.price;
   if (data.quantity !== undefined) payload.stock = data.quantity;
   if (data.isFeatured !== undefined) payload.isFeatured = data.isFeatured;

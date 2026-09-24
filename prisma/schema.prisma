@@ -294,11 +294,16 @@ model Product {
   // variant by `prisma/backfill-products.ts`. `sku` is uniquely indexed
   // — MySQL permits multiple NULLs on a UNIQUE column so legacy rows are
   // tolerated until backfill runs.
-  sku      String?  @unique
-  barcode  String?
-  price    Decimal? @db.Decimal(10, 2)
-  stock    Int      @default(0)
-  reserved Int      @default(0)
+  sku            String?   @unique
+  barcode        String?
+  // Cloudinary image audit (admin "missing images" export). `imageCheckedAt`
+  // null = never checked; `imageFound` = whether SKU / SKU_1 / barcode had an
+  // asset at that time. Reset to null whenever sku or barcode changes.
+  imageCheckedAt DateTime?
+  imageFound     Boolean?
+  price          Decimal?  @db.Decimal(10, 2)
+  stock          Int       @default(0)
+  reserved       Int       @default(0)
 
   isActive     Boolean  @default(true)
   isFeatured   Boolean  @default(false)

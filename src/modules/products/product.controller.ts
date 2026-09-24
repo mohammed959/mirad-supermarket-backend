@@ -13,6 +13,7 @@ import {
 } from './product.schema';
 import { parseOptionalLangQuery } from '../categories/category.schema';
 import { ok, created, noContent, notFound, badRequest } from '../../lib/response';
+import { runImageCheckBatch, getImageCheckStatus, buildMissingImagesWorkbook } from './product.missingImages';
 
 function qs(val: unknown): string | undefined {
   return typeof val === 'string' ? val : undefined;
@@ -134,6 +135,37 @@ export async function downloadTemplate(_req: Request, res: Response): Promise<vo
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', 'attachment; filename="product-import-template.xlsx"');
   res.send(buffer);
+}
+
+/**
+ * Checks the next batch of never-checked products against Cloudinary. Returns
+ * the .xlsx of products with no image; when there is nothing to download it
+ * returns JSON instead (`allChecked`, or a batch where every product had an
+ * image) so the admin UI can show a message.
+ */
+export async function exportMissingImages(_req: Request, res: Response): Promise<void> {
+  try {
+    const before = await getImageCheckStatus();
+    if (before.remaining === 0) {
+      ok(res, { allChecked: true, ...before });
+      return;
+    }
+    const batch = await runImageCheckBatch();
+    if (batch.missing.length === 0) {
+      ok(res, { allChecked: false, missingCount: 0, checked: batch.checked, unverified: batch.unverified, remaining: batch.remaining });
+      return;
+    }
+    const buffer = await buildMissingImagesWorkbook(batch.missing);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="products-missing-images.xlsx"');
+    res.send(buffer);
+  } catch (err) {
+    badRequest(res, (err as Error).message);
+  }
+}
+
+export async function imageCheckStatus(_req: Request, res: Response): Promise<void> {
+  ok(res, await getImageCheckStatus());
 }
 
 // ─── Marketplace localized POST endpoints ──────────────────────────
